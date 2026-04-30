@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+jspm_packages/
+
+# Build and Output
+dist/
+dist-ssr/
+build/
+out/
+.next/
+.serverless/
+.fusebox/
+.dynamodb/
+target/
+
+# Environment Variables and Secrets
+.env
+.env.local
+.env.development.local
+.env.staging.local
+.env.production.local
+.env.test.local
+.env.*.local
+*.pem
+*.key
+.node_repl_history
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and Editors
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.bak
+*.tmp
+*.temp
+.project
+.classpath
+.settings/
+
+# TypeScript/JavaScript
+*.tsbuildinfo
+.vite/
+.eslintcache
+.stylelintcache
+.prettiercache
+
+# Prisma
+# Note: migrations are usually kept, but we ignore any local sqlite dbs or generated clients if in non-standard paths
+# backend/prisma/generated-client/
+
+# Uploads and Temp
+uploads/
+tmp/
+temp/
+vendor/
+
+# Cypress
+cypress/videos/
+cypress/screenshots/

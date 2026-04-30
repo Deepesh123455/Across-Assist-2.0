@@ -1,0 +1,803 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+  
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+enum ClientType {
+  OEM
+  NBFC
+  RETAILER
+  MARKETPLACE
+  TELECOM
+  OTHER
+}
+
+enum ClientTier {
+  PLATINUM
+  GOLD
+  SILVER
+}
+
+enum ProductCategory {
+  ACCIDENTAL_DAMAGE      // Accidental & Liquid Damage Protection
+  SCREEN_PROTECTION      // OTSR — One Time Screen Replacement
+  EXTENDED_WARRANTY      // Extended Warranty beyond OEM
+  CYBER_PROTECTION       // Cyber Protection — data, identity, digital theft
+}
+
+enum DistributionModel {
+  OFFLINE_RETAIL
+  ONLINE_ECOMMERCE
+  NBFC_EMI
+  DIRECT_TO_CONSUMER
+  MIXED
+}
+
+enum MonthlyVolumeRange {
+  RANGE_UNDER_5K
+  RANGE_5K_50K
+  RANGE_50K_5L
+  RANGE_5L_PLUS
+  UNDER_5K
+  ABOVE_5L
+}
+
+enum PrimaryGoal {
+  POST_WARRANTY_REVENUE
+  ADDITIONAL_REVENUE_PER_DEVICE
+  REDUCE_REPAIR_COMPLAINTS
+  BEAT_COMPETITORS
+  BUNDLE_WITH_EMI
+}
+
+enum SessionStatus {
+  ACTIVE
+  ABANDONED
+  COMPLETED
+  RECOVERED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL_SENT
+  NEGOTIATING
+  CONVERTED
+  LOST
+  COLD
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum EmailType {
+  STEP_ABANDONED    // 30 min after abandonment
+  CHAT_ABANDONED    // left during AI chat
+  REMINDER_2        // 24 hrs later
+  REMINDER_3        // 72 hrs later — looks human-sent
+  WELCOME           // after signup
+  VERIFICATION      // email verification
+  LEAD_NOTIFICATION // to sales team
+  PASSWORD_RESET
+}
+
+enum GadgetCategory {
+  SMARTPHONES
+  LAPTOPS_TABLETS
+  TVS
+  LARGE_APPLIANCES
+  WEARABLES
+  REFURBISHED_DEVICES
+  TWO_WHEELERS
+  COMMERCIAL_VEHICLES
+}
+
+// ============================================================================
+// TABLE 1 — users
+// The authenticated accounts (created only at "Proceed to Partnership" click)
+// ============================================================================
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  name            String
+  companyName     String    @map("company_name")
+  phone           String?
+  passwordHash    String?   @map("password_hash") // null for Google OAuth users
+  googleId        String?   @unique @map("google_id")
+  avatarUrl       String?   @map("avatar_url")
+
+  // Business profile (pre-filled from session form data on signup)
+  clientType      ClientType? @map("client_type")
+  industry        String?
+  city            String?
+  website         String?
+
+  // Account state
+  isVerified      Boolean   @default(false) @map("is_verified")
+  isEmailVerified    Boolean?   @default(false) @map("is_email_verified")
+  isActive        Boolean   @default(true)  @map("is_active")
+  onboardingDone  Boolean   @default(false) @map("onboarding_done")
+  role            String    @default("CLIENT") // CLIENT | ADMIN | SALES
+
+  // Session merging — links to the anonymous session that became this account
+  primarySessionId String?  @unique @map("primary_session_id")
+
+  // Timestamps
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  primarySession  Session?  @relation("UserPrimarySession", fields: [primarySessionId], references: [id])
+  sessions        Session[] @relation("UserSessions")
+  leads           Lead[]
+  passwordResets  PasswordReset[]
+  emailLogs       EmailLog[]
+
+  @@map("users")
+}
+
+// ============================================================================
+// TABLE 2 — password_resets
+// ============================================================================
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+// ============================================================================
+// TABLE 3 — sessions
+// Tracks every visitor — anonymous (no email) and identified (email captured)
+// This is the backbone of abandoned session recovery
+// ============================================================================
+
+model Session {
+  id            String        @id @default(uuid())
+  sessionToken       String?    @unique @map("session_token") // UUID stored in localStorage
+
+  // Identity — captured progressively, not required upfront
+  email         String?
+  contactEmail  String?       // Session context snapshot
+  clientType    ClientType?   @map("client_type")
+  name          String?
+  contactName   String?       @map("contact_name")
+  companyName   String?       @map("company_name")
+  phone         String?
+
+  // Link to authenticated user (set during session merge on signup/login)
+  userId        String?       @map("user_id")
+
+  // 5-step form progress
+  currentStep   Int           @default(1) @map("current_step") // 1–5
+  formData      Json?         @map("form_data")
+  // formData shape:
+  // {
+  //   clientType: ClientType | null,
+  //   gadgetCategories: GadgetCategory[],
+  //   monthlyVolume: MonthlyVolumeRange | null,
+  //   primaryGoal: PrimaryGoal | null,
+  //   distributionModel: DistributionModel | null
+  // }
+
+  // Session lifecycle
+  status          SessionStatus  @default(ACTIVE)
+  isConverted     Boolean        @default(false) @map("is_converted")
+  abandonedAt     DateTime?      @map("abandoned_at")
+  completedAt     DateTime?      @map("completed_at")
+  recoveredAt     DateTime?      @map("recovered_at")
+
+  // Follow-up email tracking
+  followUpSent    Boolean        @default(false) @map("follow_up_sent")
+  followUpSentAt  DateTime?      @map("follow_up_sent_at")
+  followUpOpened  Boolean        @default(false) @map("follow_up_opened")
+  followUpClicked Boolean        @default(false) @map("follow_up_clicked")
+
+  // Traffic source
+  ipAddress       String?        @map("ip_address")
+  userAgent       String?        @map("user_agent")
+  utmSource       String?        @map("utm_source")
+  utmMedium       String?        @map("utm_medium")
+  utmCampaign     String?        @map("utm_campaign")
+  referrer        String?
+
+  // Timestamps
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt      @map("updated_at")
+
+  // Relations
+  userAsOwner         User?      @relation("UserSessions", fields: [userId], references: [id])
+  primaryForUser      User?      @relation("UserPrimarySession")
+  chatMessages        ChatMessage[]
+  leads               Lead[]
+  abandonedEmails     AbandonedSessionEmail[]
+  recommendation      Recommendation?
+
+  @@index([email])
+  @@index([status])
+  @@index([updatedAt])  // cron job queries this heavily
+  @@index([sessionToken])
+  @@map("sessions")
+}
+
+// ============================================================================
+// TABLE 4 — clients
+// Institutional clients shown in the marquee & client showcase (B2B partners)
+// NOT individual end-consumers — these are Hisense, Cashify, IDFC First, etc.
+// ============================================================================
+
+model Client {
+  id                String      @id @default(uuid())
+  name              String
+  slug              String      @unique // "hisense", "cashify", "idfc-first-bank"
+  logoUrl           String?     @map("logo_url")  // Cloudinary URL
+  logoPublicId      String?     @map("logo_public_id") // Cloudinary public_id for deletion
+  website           String?
+
+  // Classification
+  clientType        ClientType  @map("client_type")
+  industry          String?     // "Consumer Electronics", "Fintech", "Travel"
+  tier              ClientTier  @default(SILVER)
+  city              String?
+  state             String?
+  contactName       String?
+  contactEmail      String?
+  contactPhone      String?
+  cityTier          Int?
+  avgDeviceASP      Decimal?    @db.Decimal(10,2)
+  nbfcPartnerNames  String[]
+  existingProtectionVendor String?
+  primaryDistributionStates String[]
+  typicalDeviceCategories   GadgetCategory[]
+
+  // Partnership data
+  partnershipSince  DateTime?   @map("partnership_since")
+  monthlyVolume     Int?        @map("monthly_volume") // approx units/month
+  isActive          Boolean     @default(true) @map("is_active")
+  isFeatured        Boolean     @default(false) @map("is_featured") // appears in marquee
+  sortOrder         Int         @default(0) @map("sort_order") // manual ordering in marquee
+
+  // For AI recommendation — "similar clients who took this bundle"
+  description       String?     // short 1-line description for AI context
+
+  // Timestamps
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  clientBundles     ClientBundle[]
+
+  @@index([clientType])
+  @@index([isFeatured])
+  @@index([isActive])
+  @@map("clients")
+}
+
+// ============================================================================
+// TABLE 5 — products
+// The 4 gadget protection product lines offered by Across Assist
+// ============================================================================
+
+model Product {
+  id            String          @id @default(uuid())
+  name          String
+  slug          String          @unique
+  category      ProductCategory
+  tagline       String?         // short one-liner for card display
+  description   String          // full description
+  iconEmoji     String?         @map("icon_emoji")
+
+  // Pricing
+  basePrice     Decimal         @map("base_price") @db.Decimal(10, 2)
+  // claim data — used by AI to determine margin/value
+  claimFrequency    String?     @map("claim_frequency")    // "LOW" | "MEDIUM" | "HIGH"
+  avgClaimCost      Decimal?    @map("avg_claim_cost")     @db.Decimal(10, 2)
+
+  // What's covered — stored as JSON array for flexibility
+  coverageItems     Json        @map("coverage_items")
+  // e.g. ["Mobile damage cover", "Laptop damage cover", "Tablet damage cover"]
+
+  // Which gadget categories this product applies to
+  applicableGadgets GadgetCategory[] @map("applicable_gadgets")
+
+  isActive          Boolean     @default(true) @map("is_active")
+  sortOrder         Int         @default(0) @map("sort_order")
+
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  bundleProducts    BundleProduct[]
+  claimStats        ProductClaimStat[]
+
+  @@map("products")
+}
+
+// ============================================================================
+// TABLE 6 — bundles
+// Pre-defined combinations. This is the AI recommendation knowledge base.
+// When Groq recommends, it picks from these + explains why.
+// ============================================================================
+
+model Bundle {
+  id                    String             @id @default(uuid())
+  name                  String             // "Complete Device Shield", "Home Protection Suite"
+  slug                  String             @unique
+  tagline               String?            // one-line pitch
+  description           String
+
+  // Targeting — which client profile does this bundle suit?
+  targetClientType      ClientType[]       @map("target_client_type")
+  targetGadgets         GadgetCategory[]   @map("target_gadgets")
+  targetDistribution    DistributionModel? @map("target_distribution")
+  targetGoal            PrimaryGoal?       @map("target_goal")
+
+  // Financial data — used in revenue calculator
+  averagePlanValue      Decimal            @map("average_plan_value") @db.Decimal(10, 2)
+  attachmentRateBench   Decimal            @map("attachment_rate_bench") @db.Decimal(5, 4)
+  attachRateP10         Decimal?           @map("attach_rate_p10")  @db.Decimal(5, 4)
+  attachRateP50         Decimal?           @map("attach_rate_p50")  @db.Decimal(5, 4)
+  attachRateP90         Decimal?           @map("attach_rate_p90")  @db.Decimal(5, 4)
+  // Revenue shares (as decimals: 0.25 = 25%)
+  oemRevenueShare       Decimal            @map("oem_revenue_share")       @db.Decimal(5, 4)
+  retailerRevenueShare  Decimal            @map("retailer_revenue_share")  @db.Decimal(5, 4)
+  nbfcRevenueShare      Decimal            @map("nbfc_revenue_share")      @db.Decimal(5, 4)
+  acrossAssistShare     Decimal            @map("across_assist_share")     @db.Decimal(5, 4)
+
+  // AI reasoning data — injected into Groq system prompt
+  whyThisBundle         Json               @map("why_this_bundle")
+  // Array of 3 strings:
+  // ["80% of phone claims are screen damage — OTSR alone misses liquid damage",
+  //  "Bundling covers 95% of all device damage scenarios",
+  //  "Clients report 40% higher renewal when both are bundled"]
+
+  objectionHandler      String             @map("objection_handler")
+  // "At Rs. 1,200, the plan is only 3.4% of a Rs. 35,000 TV — easiest sell at POS"
+
+  performanceData       Json?              @map("performance_data")
+  // Historical stats: { "renewalRateBoost": "40%", "attachmentRate": "32%" }
+
+  // Display
+  isPopular             Boolean            @default(false) @map("is_popular")
+  isActive              Boolean            @default(true)  @map("is_active")
+  sortOrder             Int                @default(0)     @map("sort_order")
+
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  bundleProducts        BundleProduct[]
+  clientBundles         ClientBundle[]
+  recommendations       Recommendation[]
+  leads                 Lead[]
+  performanceBySegment  BundlePerformanceBySegment[]
+
+  @@map("bundles")
+}
+
+// ============================================================================
+// TABLE 7 — bundle_products (Junction: Bundle <-> Product)
+// Which products make up each bundle, and which is the anchor
+// ============================================================================
+
+model BundleProduct {
+  bundleId    String   @map("bundle_id")
+  productId   String   @map("product_id")
+  isAnchor    Boolean  @default(false) @map("is_anchor") // the primary product
+  sortOrder   Int      @default(0) @map("sort_order")
+  notes       String?  // "Main upsell driver" / "Low claim, high margin"
+
+  bundle      Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([bundleId, productId])
+  @@map("bundle_products")
+}
+
+// ============================================================================
+// TABLE 8 — client_bundles
+// Which bundles your EXISTING institutional clients have taken.
+// Powers: "Similar clients who took this bundle" feature in AI output
+// ============================================================================
+
+model ClientBundle {
+  id              String   @id @default(uuid())
+  clientId        String   @map("client_id")
+  bundleId        String   @map("bundle_id")
+
+  // Performance data for this specific client-bundle pair
+  startedAt       DateTime @map("started_at")
+  monthlyUnits    Int?     @map("monthly_units")
+  displayVolume   String?  @map("display_volume")
+  attachmentRate  Decimal? @map("attachment_rate") @db.Decimal(5, 4)
+  planValue       Decimal? @map("plan_value") @db.Decimal(10, 2)
+  isActive        Boolean  @default(true) @map("is_active")
+
+  // Testimonial / case study data
+  testimonial     String?
+  revenueGenerated Decimal? @map("revenue_generated") @db.Decimal(15, 2)
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bundle          Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, bundleId])
+  @@map("client_bundles")
+}
+
+// ============================================================================
+// TABLE 9 — recommendations
+// Every AI recommendation generated. One per session (can be regenerated).
+// ============================================================================
+
+model Recommendation {
+  id                    String   @id @default(uuid())
+  sessionId             String   @unique @map("session_id")
+
+  // Input snapshot — exactly what the AI was given
+  inputClientType       ClientType?        @map("input_client_type")
+  inputGadgets          GadgetCategory[]   @map("input_gadgets")
+  inputVolume           MonthlyVolumeRange? @map("input_volume")
+  inputGoal             PrimaryGoal?       @map("input_goal")
+  inputDistribution     DistributionModel? @map("input_distribution")
+  inputCityTier         Int?               @map("input_city_tier")
+  inputAvgDeviceASP     String?            @map("input_avg_device_asp")
+  inputExistingVendor   String?            @map("input_existing_vendor")
+  inputNbfcPartners     String[]           @map("input_nbfc_partners")
+
+  // AI output
+  correctedBundleId String?  @map("corrected_bundle_id")
+  correctionReason  String?  @db.Text @map("correction_reason")
+  aiResponseRaw     String?  @db.Text @map("ai_response_raw")   // full Groq JSON string
+  recommendedBundleId   String?  @map("recommended_bundle_id")
+  bundleName            String   @map("bundle_name")
+  whyThisCombo          Json     @map("why_this_combo")    // 3 reasons array
+  objectionHandler      String?  @map("objection_handler")
+  similarClients        Json?    @map("similar_clients")   // [{name, logoUrl, tier}]
+
+  // Computed revenue projection (calculated by backend, not AI)
+  projectedMonthlyUnits   Int?    // Performance Metrics (estimated/historical)
+  projectedAttachmentRate Decimal? @map("projected_attachment_rate") @db.Decimal(5, 4)
+  attachRateP10           Decimal? @map("attach_rate_p10")           @db.Decimal(5, 2)
+  attachRateP50           Decimal? @map("attach_rate_p50")           @db.Decimal(5, 2)
+  attachRateP90           Decimal? @map("attach_rate_p90")           @db.Decimal(5, 2)
+  projectedPlanValue      Decimal? @map("projected_plan_value")      @db.Decimal(10, 2)
+  projectedAnnualRevenue  Decimal? @map("projected_annual_revenue")  @db.Decimal(15, 2)
+  segmentP10AnnualRevenue Decimal? @map("segment_p10_annual_revenue") @db.Decimal(15, 2)
+  segmentP50AnnualRevenue Decimal? @map("segment_p50_annual_revenue") @db.Decimal(15, 2)
+  segmentP90AnnualRevenue Decimal? @map("segment_p90_annual_revenue") @db.Decimal(15, 2)
+  clientRevenueShare      Decimal? @map("client_revenue_share")      @db.Decimal(5, 4)
+  confidenceScore         Decimal? @map("confidence_score")          @db.Decimal(5, 2)
+
+  // Quality tracking
+  tokensUsed       Int?     @map("tokens_used")
+  modelUsed        String?  @map("model_used")  // "llama-3.3-70b-versatile"
+  generationMs     Int?     @map("generation_ms") // response time in ms
+  fromCache        Boolean  @default(false) @map("from_cache")
+  cacheKey         String?  @map("cache_key")
+
+  // Feedback
+  feedbackRating   String?  @map("feedback_rating") // "ACCURATE" | "PARTIAL" | "INACCURATE"
+  feedbackNote     String?  @map("feedback_note")
+
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  session          Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  bundle           Bundle?  @relation(fields: [recommendedBundleId], references: [id])
+
+  @@map("recommendations")
+}
+
+// ============================================================================
+// TABLE 10 — chat_messages
+// Every AI chat message — stored in DB, never in browser state.
+// Powers cross-device continuity and sales team chat review.
+// ============================================================================
+
+model ChatMessage {
+  id             String    @id @default(uuid())
+  sessionId      String    @map("session_id")
+  role           ChatRole
+  content        String    @db.Text
+  messageIndex   Int?      @map("message_index") // ordering within the session
+
+  // Metadata
+  tokensUsed     Int?      @map("tokens_used")
+  modelUsed      String?   @map("model_used")
+  responseMs     Int?      @map("response_ms")   // Groq response time
+
+  // For UI display
+  isError        Boolean   @default(false) @map("is_error")
+
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  session        Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, messageIndex])
+  @@map("chat_messages")
+}
+
+// ============================================================================
+// TABLE 11 — leads
+// A lead is created when the session completes the form OR clicks "Proceed to Partnership"
+// This is what your sales team works from
+// ============================================================================
+
+model Lead {
+  id              String      @id @default(uuid())
+  sessionId       String?     @map("session_id")
+  userId          String?     @map("user_id")  // set after they create account
+
+  // Contact info (from form + session)
+  name            String
+  contactName     String?     @map("contact_name")
+  email           String?
+  contactEmail    String?     @map("contact_email")
+  clientType         ClientType? @map("client_type")
+  companyName        String?     @map("company_name")
+  phone           String?
+  contactPhone    String?     @map("contact_phone")
+  city            String?
+  state           String?
+  source          String?
+
+  // Business profile at time of lead creation
+  gadgetCategories GadgetCategory[] @map("gadget_categories")
+  monthlyVolume   MonthlyVolumeRange? @map("monthly_volume")
+  primaryGoal     PrimaryGoal?  @map("primary_goal")
+  distributionModel DistributionModel? @map("distribution_model")
+
+  // What AI recommended
+  recommendedBundleId    String?   @map("recommended_bundle_id")
+  aiRecommendationText   String?   @db.Text @map("ai_recommendation_text")
+  projectedAnnualRevenue Decimal?  @map("projected_annual_revenue") @db.Decimal(15, 2)
+
+  // AI-generated summary of chat — what sales rep reads before calling
+  chatSummary     String?     @db.Text @map("chat_summary")
+  // Format: "• Most interested in: Extended Warranty + Accidental Damage bundle
+  //          • Main concern: Implementation timeline and retailer training
+  //          • Decision timeline: Q3 2025"
+
+  // Sales pipeline
+  status          LeadStatus  @default(NEW)
+  assignedTo      String?     @map("assigned_to") // sales rep email/name
+  score           Int?
+  convertedClientId String?   @map("converted_client_id")
+  notes           String?     @db.Text
+  followUpAt      DateTime?   @map("follow_up_at")
+  convertedAt     DateTime?   @map("converted_at")
+  lostReason      String?     @map("lost_reason")
+
+  // Traffic attribution
+  utmSource       String?     @map("utm_source")
+  utmMedium       String?     @map("utm_medium")
+  utmCampaign     String?     @map("utm_campaign")
+  referrer        String?
+
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  session         Session?    @relation(fields: [sessionId], references: [id])
+  user            User?       @relation(fields: [userId], references: [id])
+  bundle          Bundle?     @relation(fields: [recommendedBundleId], references: [id])
+  activities      LeadActivity[]
+
+  @@index([status])
+  @@index([email])
+  @@index([assignedTo])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+// ============================================================================
+// TABLE 12 — lead_activities
+// Every action taken on a lead — calls, emails, meetings, status changes
+// Full audit trail for sales team
+// ============================================================================
+
+model LeadActivity {
+  id          String   @id @default(uuid())
+  leadId      String   @map("lead_id")
+  type        String   // "CALL" | "EMAIL" | "MEETING" | "STATUS_CHANGE" | "NOTE"
+  subject     String?
+  body        String?  @db.Text
+  description String?  @db.Text
+  outcome     String?
+  performedBy String   @map("performed_by") // sales rep name/email
+  metadata    Json?    // { oldStatus, newStatus } for status changes, etc.
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@map("lead_activities")
+}
+
+// ============================================================================
+// TABLE 13 — abandoned_session_emails
+// Every follow-up email sent for abandoned sessions
+// Tracks the full 3-email sequence per session
+// ============================================================================
+
+model AbandonedSessionEmail {
+  id            String     @id @default(uuid())
+  sessionId     String     @map("session_id")
+  email         String
+  toEmail       String?    @map("to_email")
+  description   String?    @db.Text
+  resumeUrl     String?    @map("resume_url")
+  emailType     EmailType  @map("email_type")
+
+  // Delivery
+  sentAt        DateTime?  @map("sent_at")
+  deliveredAt   DateTime?  @map("delivered_at")
+  failedAt      DateTime?  @map("failed_at")
+  failReason    String?    @map("fail_reason")
+
+  // Engagement tracking
+  openedAt      DateTime?  @map("opened_at")
+  clickedAt     DateTime?  @map("clicked_at")
+
+  // The secure token embedded in the resume link
+  resumeToken   String?    @unique @map("resume_token")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+  tokenUsedAt   DateTime?  @map("token_used_at")
+  resumeTokenUsedAt DateTime? @map("resume_token_used_at")
+
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  session       Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([resumeToken])
+  @@map("abandoned_session_emails")
+}
+
+// ============================================================================
+// TABLE 14 — email_logs
+// Every email ever sent by the system — abandonment, welcome, verification etc.
+// For auditing and debugging
+// ============================================================================
+
+model EmailLog {
+  id          String    @id @default(uuid())
+  userId      String?   @map("user_id")
+  toEmail     String    @map("to_email")
+  toName      String?   @map("to_name")
+  emailType   EmailType @map("email_type")
+  templateId  String?   @map("template_id")
+  subject     String
+  metadata    Json?
+  status      String    // "SENT" | "DELIVERED" | "FAILED" | "BOUNCED"
+  provider    String?   // "resend" | "nodemailer"
+  messageId   String?   @map("message_id") // from email provider
+  error       String?
+  deliveredAt DateTime? @map("delivered_at")
+  openedAt    DateTime? @map("opened_at")
+  sentAt      DateTime  @default(now()) @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User?     @relation(fields: [userId], references: [id])
+
+  @@index([toEmail])
+  @@index([emailType])
+  @@map("email_logs")
+}
+
+// ============================================================================
+// TABLE 15 — analytics_events
+// Lightweight event tracking — which step, which button, which section
+// Powers the funnel analysis in admin dashboard
+// ============================================================================
+
+model AnalyticsEvent {
+  id            String   @id @default(uuid())
+  sessionId     String?  @map("session_id")
+  userId        String?  @map("user_id")
+  event         String
+  eventType     String?  @map("event_type")
+  // Events: "PAGE_VIEW" | "STEP_1_START" | "STEP_2_COMPLETE" | "EMAIL_CAPTURED"
+  //         "AI_RECOMMENDATION_REQUESTED" | "AI_RECOMMENDATION_VIEWED"
+  //         "CHAT_STARTED" | "CHAT_MESSAGE_SENT"
+  //         "PROCEED_TO_PARTNERSHIP_CLICKED" | "SIGNUP_STARTED" | "SIGNUP_COMPLETED"
+  //         "RESUME_LINK_CLICKED" | "CALCULATOR_USED" | "PROPOSAL_DOWNLOADED"
+  properties    Json?    // { step: 3, bundleId: "xxx", fromEmail: true }
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([sessionId])
+  @@index([event])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
+
+// ============================================================================
+// TABLE 16 — product_claim_stats
+// ============================================================================
+model ProductClaimStat {
+  id                        String   @id @default(uuid())
+  productId                 String   @map("product_id")
+  gadgetCategory            GadgetCategory @map("gadget_category")
+  
+  claimRatePct              Decimal  @map("claim_rate_pct") @db.Decimal(5, 2)
+  avgSettlementDays         Decimal  @map("avg_settlement_days") @db.Decimal(5, 1)
+  topClaimReason            String   @map("top_claim_reason")
+  secondClaimReason         String?  @map("second_claim_reason")
+  avgRepairCostRs           Decimal  @map("avg_repair_cost_rs") @db.Decimal(10, 2)
+  claimApprovalRatePct      Decimal  @map("claim_approval_rate_pct") @db.Decimal(5, 2)
+  
+  tier1ClaimRatePct         Decimal  @map("tier1_claim_rate_pct") @db.Decimal(5, 2)
+  tier2ClaimRatePct         Decimal  @map("tier2_claim_rate_pct") @db.Decimal(5, 2)
+  tier3ClaimRatePct         Decimal  @map("tier3_claim_rate_pct") @db.Decimal(5, 2)
+  
+  aspirDeviceClaimRatePct   Decimal  @map("aspir_device_claim_rate_pct") @db.Decimal(5, 2)
+  premiumDeviceClaimRatePct Decimal  @map("premium_device_claim_rate_pct") @db.Decimal(5, 2)
+  
+  peakClaimMonths           String[] @map("peak_claim_months")
+  notes                     String?  @db.Text
+  
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  product                   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_claim_stats")
+}
+
+// ============================================================================
+// TABLE 17 — bundle_performance_by_segment
+// ============================================================================
+model BundlePerformanceBySegment {
+  id               String   @id @default(uuid())
+  bundleId         String   @map("bundle_id")
+  clientType       ClientType @map("client_type")
+  volumeRange      MonthlyVolumeRange @map("volume_range")
+  cityTier         Int      @map("city_tier")
+  
+  avgAttachRatePct Decimal  @map("avg_attach_rate_pct") @db.Decimal(5, 2)
+  p10AttachRatePct Decimal  @map("p10_attach_rate_pct") @db.Decimal(5, 2)
+  p50AttachRatePct Decimal  @map("p50_attach_rate_pct") @db.Decimal(5, 2)
+  p90AttachRatePct Decimal  @map("p90_attach_rate_pct") @db.Decimal(5, 2)
+  
+  avgPlanValueRs   Decimal  @map("avg_plan_value_rs") @db.Decimal(10, 2)
+  sampleSize       Int      @map("sample_size")
+  
+  topDrivers       String[] @map("top_drivers")
+  topBlockers      String[] @map("top_blockers")
+  notes            String?  @db.Text
+  
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  bundle           Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  @@map("bundle_performance_by_segments")
+}
