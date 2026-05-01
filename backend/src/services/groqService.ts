@@ -134,6 +134,7 @@ function buildChatSystemPrompt(ctx?: ChatSessionContext): string {
   const profileLines: string[] = [];
 
   if (ctx.partnerType) profileLines.push(`This client is a ${ctx.partnerType}`);
+  if (ctx.segment) profileLines.push(`operating in the ${ctx.segment} sector`);
   if (ctx.products?.length) profileLines.push(`selling ${ctx.products.join(', ')}`);
   if (ctx.volume) profileLines.push(`at ${ctx.volume} monthly volume`);
   if (profileLines.length > 0) prompt += `\n\n${profileLines.join(', ')}.`;
@@ -220,6 +221,8 @@ export interface ChatSessionContext {
   goal?: string | null;
   distribution?: string | null;
   recommendedBundle?: string | null;
+  /** NEW — set from Session.formData.segment after onboarding ('travel' | 'gadget' | 'automobile') */
+  segment?: string | null;
 }
 
 // ─── GroqService ──────────────────────────────────────────────────────────────

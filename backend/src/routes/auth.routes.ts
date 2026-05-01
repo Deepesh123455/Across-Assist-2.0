@@ -21,7 +21,7 @@ authRouter.post('/otp/abort',      validate(abortOtpSchema),  abortOtpHandler);
 // Restrict or remove in production as needed.
 authRouter.post(
   '/otp/demo-login',
-  validate(z.object({ email: z.string().email(), sessionToken: z.string().optional() })),
+  validate(z.object({ email: z.string().email(), sessionToken: z.string().nullish() })),
   demoLoginHandler,
 );
 

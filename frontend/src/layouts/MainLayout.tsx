@@ -14,6 +14,9 @@ export const MainLayout = () => {
     ROUTES.REVENUE_CALCULATOR,
     ROUTES.CHAT,
     ROUTES.ADVISOR,
+    ROUTES.ONBOARDING,
+    ROUTES.BUNDLES,
+    ROUTES.PROFILE,
   ].includes(location.pathname as any);
 
   return (

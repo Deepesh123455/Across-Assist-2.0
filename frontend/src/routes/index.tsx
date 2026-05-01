@@ -17,6 +17,9 @@ const SignupPage = lazy(() => import('../pages/auth/SignupPage'));
 const DashboardPage = lazy(() => import('../pages/DashboardPage'));
 const NotFoundPage = lazy(() => import('../pages/NotFoundPage'));
 const ResumePage = lazy(() => import('../pages/ResumePage'));
+const OnboardingPage = lazy(() => import('../pages/OnboardingPage'));
+const BundlesPage = lazy(() => import('../pages/BundlesPage'));
+const ProfilePage = lazy(() => import('../pages/ProfilePage'));
 
 const Loader = () => (
   <div className="flex h-screen items-center justify-center bg-white">
@@ -40,6 +43,30 @@ export const AppRoutes = () => (
           element={
             <PrivateRoute>
               <DashboardPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path={ROUTES.ONBOARDING}
+          element={
+            <PrivateRoute>
+              <OnboardingPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path={ROUTES.BUNDLES}
+          element={
+            <PrivateRoute>
+              <BundlesPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path={ROUTES.PROFILE}
+          element={
+            <PrivateRoute>
+              <ProfilePage />
             </PrivateRoute>
           }
         />

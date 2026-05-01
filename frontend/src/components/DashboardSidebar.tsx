@@ -1,8 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { 
-  Home, Calculator, MessageSquare, Download, Settings, LogOut, 
-  ChevronRight, LucideIcon 
+import {
+  Calculator, MessageSquare, Download, Settings, LogOut,
+  ChevronRight, LucideIcon, User, Shield
 } from 'lucide-react';
 import { ROUTES } from '../constants/routes';
 import logoImg from '../assets/images/logo-for-white-bg.png';
@@ -17,17 +17,16 @@ interface NavItemProps {
 
 const NavItem = ({ to, icon: Icon, label, isActive, onClick }: NavItemProps) => {
   return (
-    <Link 
-      to={to} 
+    <Link
+      to={to}
       onClick={onClick}
-      className={`relative group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
-        isActive 
-          ? 'text-[#1A56DB]' 
+      className={`relative group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${isActive
+          ? 'text-[#1A56DB]'
           : 'text-slate-500 hover:text-[#1A56DB] hover:bg-slate-50'
-      }`}
+        }`}
     >
       {isActive && (
-        <motion.div 
+        <motion.div
           layoutId="sidebar-active"
           className="absolute inset-0 bg-blue-50 rounded-xl -z-10"
           initial={false}
@@ -52,7 +51,8 @@ export const DashboardSidebar = ({ userName, companyName, initials, onLogout }: 
   const location = useLocation();
 
   const navLinks = [
-    { to: ROUTES.DASHBOARD, icon: Home, label: 'My Recommendation' },
+    { to: ROUTES.PROFILE, icon: User, label: 'Your Profile' },
+    { to: ROUTES.BUNDLES, icon: Shield, label: 'Bundle Details' },
     { to: ROUTES.REVENUE_CALCULATOR, icon: Calculator, label: 'Revenue Calculator' },
     { to: ROUTES.CHAT, icon: MessageSquare, label: 'AI Chat' },
   ];
@@ -80,7 +80,7 @@ export const DashboardSidebar = ({ userName, companyName, initials, onLogout }: 
       <div className="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto custom-scrollbar">
         <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Main Navigation</p>
         {navLinks.map((link) => (
-          <NavItem 
+          <NavItem
             key={link.to}
             to={link.to}
             icon={link.icon}
@@ -91,25 +91,25 @@ export const DashboardSidebar = ({ userName, companyName, initials, onLogout }: 
 
         <div className="pt-8 space-y-1.5">
           <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Account & Support</p>
-          <NavItem 
-            to="#" 
-            icon={Download} 
-            label="Download Proposal" 
-            isActive={false} 
+          <NavItem
+            to="#"
+            icon={Download}
+            label="Download Proposal"
+            isActive={false}
             onClick={() => console.log('Download')}
           />
-          <NavItem 
-            to="#" 
-            icon={Settings} 
-            label="Settings" 
-            isActive={false} 
+          <NavItem
+            to="#"
+            icon={Settings}
+            label="Settings"
+            isActive={false}
             onClick={() => console.log('Settings')}
           />
         </div>
       </div>
 
       <div className="p-4 border-t border-slate-100 bg-slate-50/50">
-        <button 
+        <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:text-red-600 hover:bg-red-50 transition-all duration-300 font-bold text-sm group"
         >

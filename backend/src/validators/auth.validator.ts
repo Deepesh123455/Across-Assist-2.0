@@ -10,7 +10,7 @@ export const signupSchema = z.object({
     .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number'),
-  sessionToken: z.string().optional(),
+  sessionToken: z.string().nullish(),
   clientType: z.string().optional(),
 });
 
@@ -31,7 +31,7 @@ export const verifyOtpSchema = z.object({
     .string()
     .length(6, 'Code must be exactly 6 digits')
     .regex(/^\d{6}$/, 'Code must contain only digits'),
-  sessionToken: z.string().optional(),
+  sessionToken: z.string().nullish(),
 });
 
 /** Abort — "Wrong email?" wipes all OTP state for that email */

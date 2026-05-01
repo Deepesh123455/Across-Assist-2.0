@@ -34,9 +34,15 @@ const DashboardPage = () => {
       navigate('/auth/login', { replace: true });
       return;
     }
+    // Redirect users who haven't completed onboarding
+    if (authUser && authUser.onboardingDone === false) {
+      navigate('/onboarding', { replace: true });
+      return;
+    }
     setRecommendation(normalizeRecommendation(sessionData?.recommendation ?? null));
     setFormData(sessionData?.formData ?? null);
-  }, [isAuthenticated, sessionData, navigate]);
+  }, [isAuthenticated, authUser, sessionData, navigate]);
+
 
   const handleLogout = async () => {
     await authService.logout();
@@ -93,14 +99,14 @@ const DashboardPage = () => {
 
   const revData = calculateRevenue();
   const clientTypeStr = formData?.clientType ?? authUser?.clientType ?? 'Strategic Partner';
-  
+
   if (!authUser) return null;
 
   return (
     <PageTransition>
       <div className="min-h-screen flex bg-zinc-50 font-inter overflow-hidden">
-        
-        <DashboardSidebar 
+
+        <DashboardSidebar
           userName={authUser.name}
           companyName={authUser.companyName || 'Corporate Partner'}
           initials={getInitials(authUser.name)}
@@ -109,10 +115,10 @@ const DashboardPage = () => {
 
         <main className="flex-1 lg:ml-72 h-screen overflow-y-auto custom-scrollbar">
           <div className="max-w-7xl mx-auto p-8 lg:p-12">
-            
+
             {/* Page Header */}
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-1"
@@ -129,7 +135,7 @@ const DashboardPage = () => {
                 </p>
               </motion.div>
 
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex items-center gap-3 bg-white border border-slate-200 p-2 rounded-2xl shadow-sm"
@@ -153,7 +159,7 @@ const DashboardPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1 }}
                 >
-                  <RevenueHero 
+                  <RevenueHero
                     amount={revData.cr}
                     subtitle={revData.text}
                     units={revData.units}
@@ -162,7 +168,7 @@ const DashboardPage = () => {
 
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                   {/* Bundle Details - Left 2 Columns */}
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
@@ -220,7 +226,7 @@ const DashboardPage = () => {
                   </motion.div>
 
                   {/* Sidebar Info - Right Column */}
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
@@ -244,7 +250,7 @@ const DashboardPage = () => {
                           Optimized for {authUser.companyName || 'Partners'}
                         </p>
                       </div>
-                      <button 
+                      <button
                         onClick={() => navigate('/contact')}
                         className="w-full mt-8 bg-zinc-900 text-white font-bold py-4 rounded-2xl hover:bg-zinc-800 transition-colors flex items-center justify-center gap-2"
                       >
@@ -258,7 +264,7 @@ const DashboardPage = () => {
                       <p className="text-blue-100 text-sm mb-6 leading-relaxed">
                         Our commercial experts are available to discuss bundle fine-tuning and integration strategy.
                       </p>
-                      <button 
+                      <button
                         onClick={() => navigate('/chat')}
                         className="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl transition-colors border border-white/20 backdrop-blur-sm"
                       >
@@ -289,31 +295,31 @@ const DashboardPage = () => {
                     {/* Connecting Line (Desktop) */}
                     <div className="hidden md:block absolute top-[2.25rem] left-[2.25rem] right-[2.25rem] h-[2px] bg-slate-100 -z-0" />
 
-                    <JourneyStep 
-                      title="Recommendation" 
-                      status="completed" 
+                    <JourneyStep
+                      title="Recommendation"
+                      status="completed"
                       icon={Check}
                     />
-                    <JourneyStep 
-                      title="Commercial Call" 
-                      status="active" 
+                    <JourneyStep
+                      title="Commercial Call"
+                      status="active"
                       icon={Calendar}
                       cta="Book Call"
                       onCtaClick={() => navigate('/contact')}
                     />
-                    <JourneyStep 
-                      title="Agreement" 
-                      status="pending" 
+                    <JourneyStep
+                      title="Agreement"
+                      status="pending"
                       icon={Lock}
                     />
-                    <JourneyStep 
-                      title="Integration" 
-                      status="pending" 
+                    <JourneyStep
+                      title="Integration"
+                      status="pending"
                       icon={Lock}
                     />
-                    <JourneyStep 
-                      title="Go Live" 
-                      status="pending" 
+                    <JourneyStep
+                      title="Go Live"
+                      status="pending"
                       icon={Zap}
                     />
                   </div>
@@ -321,7 +327,7 @@ const DashboardPage = () => {
               </div>
             ) : (
               /* Empty State */
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl p-12 lg:p-20 text-center max-w-4xl mx-auto my-20 relative overflow-hidden"
@@ -336,8 +342,8 @@ const DashboardPage = () => {
                 <p className="text-slate-500 text-xl mb-12 max-w-2xl mx-auto leading-relaxed">
                   Our AI advisor is ready to build a high-performance protection bundle tailored to your business model and customer base.
                 </p>
-                <button 
-                  onClick={() => navigate('/advisor')} 
+                <button
+                  onClick={() => navigate('/advisor')}
                   className="bg-[#1A56DB] hover:bg-blue-700 text-white font-black px-10 py-5 rounded-2xl transition-all duration-300 inline-flex items-center gap-3 shadow-xl shadow-blue-500/20 hover:translate-y-[-2px]"
                 >
                   Start AI Advisor <ArrowRight className="w-6 h-6" />
@@ -388,7 +394,7 @@ const JourneyStep = ({ title, status, icon: Icon, cta, onCtaClick }: any) => {
           {title}
         </div>
         {isActive && cta && (
-          <button 
+          <button
             onClick={onCtaClick}
             className="mt-2 bg-[#F97316] hover:bg-orange-600 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full transition-colors"
           >

@@ -79,6 +79,7 @@ export const sendMessage = async (
       goal: (formData?.primaryGoal ?? formData?.goal) as string | null | undefined,
       distribution: (formData?.distributionModel ?? formData?.distribution) as string | null | undefined,
       recommendedBundle: recommendation?.bundleName ?? null,
+      segment: (formData?.segment) as string | null | undefined,
     };
 
     // Last 20 messages for Groq context (excludes the user message just saved)

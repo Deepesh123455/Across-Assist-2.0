@@ -115,6 +115,7 @@ export class AuthService {
         clientType: user.clientType,
         lastLoginAt: user.lastLoginAt,
         createdAt: user.createdAt,
+        onboardingDone: user.onboardingDone,
       },
       sessionToken: user.primarySession?.sessionToken ?? null,
       recommendation: this.extractRecommendation(user.primarySession?.recommendation ?? null),

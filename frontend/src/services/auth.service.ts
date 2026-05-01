@@ -11,6 +11,7 @@ export interface AuthUser {
   clientType?: string | null;
   lastLoginAt?: string | null;
   createdAt: string;
+  onboardingDone?: boolean;
 }
 
 export interface AuthTokens {

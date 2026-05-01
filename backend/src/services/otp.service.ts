@@ -356,6 +356,7 @@ export async function verifyOtp(input: VerifyOtpInput) {
       clientType: user.clientType,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
+      onboardingDone: user.onboardingDone,
     },
     tokens,
     sessionData: {
@@ -393,9 +394,18 @@ export async function abortOtp(email: string): Promise<void> {
 export async function demoLogin(email: string, sessionToken?: string) {
   const normalised = email.toLowerCase().trim();
 
-  const user = await prisma.user.findUnique({ where: { email: normalised } });
+  let user = await prisma.user.findUnique({ where: { email: normalised } });
   if (!user) {
-    throw new AppError('No account found with this email address.', StatusCodes.NOT_FOUND);
+    user = await prisma.user.create({
+      data: {
+        email: normalised,
+        name: normalised.split('@')[0],
+        companyName: normalised.split('@')[1]?.split('.')[0] || 'Unknown',
+        role: 'CLIENT',
+        isVerified: true,
+        isEmailVerified: true,
+      },
+    });
   }
   if (!user.isActive) {
     throw new AppError('This account has been deactivated.', StatusCodes.FORBIDDEN);
@@ -450,6 +460,7 @@ export async function demoLogin(email: string, sessionToken?: string) {
       companyName: user.companyName, phone: user.phone,
       role: user.role, clientType: user.clientType,
       lastLoginAt: user.lastLoginAt, createdAt: user.createdAt,
+      onboardingDone: user.onboardingDone,
     },
     tokens,
     sessionData: {

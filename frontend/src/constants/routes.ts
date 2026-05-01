@@ -12,7 +12,13 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   RESUME: '/resume',
   NOT_FOUND: '/404',
+
+  // Onboarding flow
+  ONBOARDING: '/onboarding',
+  BUNDLES: '/bundles',
+  PROFILE: '/profile',
 } as const;
+
 
 export type RouteKey = keyof typeof ROUTES;
 export type RoutePath = (typeof ROUTES)[RouteKey];
