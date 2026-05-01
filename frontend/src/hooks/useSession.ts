@@ -17,7 +17,7 @@ export function useSession() {
       }
 
       try {
-        const response = await api.post('/sessions/start');
+        const response = await api.post('sessions/start');
         if (response.data?.success && response.data?.data?.sessionToken) {
           const token = response.data.data.sessionToken;
           localStorage.setItem(SESSION_KEY, token);

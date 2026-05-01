@@ -62,12 +62,12 @@ export const onboardingService = {
     questionId: string,
     answer: string,
   ): Promise<{ currentStep: number; totalSteps: number; isLastQuestion: boolean; sessionToken?: string }> {
-    const res = await api.post('/onboarding/answer', { sessionToken, segment, questionId, answer });
+    const res = await api.post('onboarding/answer', { sessionToken, segment, questionId, answer });
     return res.data.data;
   },
 
   async getRecommendation(sessionToken: string, segment: Segment): Promise<RecommendationResult> {
-    const res = await api.post('/onboarding/recommend', { sessionToken, segment });
+    const res = await api.post('onboarding/recommend', { sessionToken, segment });
     return res.data.data;
   },
 
