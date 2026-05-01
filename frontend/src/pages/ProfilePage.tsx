@@ -106,7 +106,12 @@ export default function ProfilePage() {
                 <h2 className="text-2xl font-black text-zinc-900 mb-4">No Onboarding Data Yet</h2>
                 <p className="text-slate-500 mb-8">Start the onboarding questionnaire to get your personalized bundle recommendation.</p>
                 <button
-                  onClick={() => navigate(ROUTES.ONBOARDING)}
+                  onClick={() => {
+                    localStorage.removeItem('aa_onboarding');
+                    localStorage.removeItem('aa_recommendation_cache');
+                    localStorage.removeItem('aa_session_token');
+                    navigate(ROUTES.ONBOARDING);
+                  }}
                   className="bg-[#1A56DB] text-white font-black px-8 py-4 rounded-2xl hover:bg-blue-700 transition-colors"
                 >
                   Start Onboarding

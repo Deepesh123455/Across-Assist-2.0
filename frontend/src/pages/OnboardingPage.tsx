@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOnboarding } from '../hooks/useOnboarding';
 import { SegmentSelector } from '../components/onboarding/SegmentSelector';
@@ -22,11 +22,12 @@ export default function OnboardingPage() {
     selectSegment, submitAnswer, recommendation,
   } = useOnboarding();
 
-  // Once recommendation is ready, navigate to /bundles
+  // ── If the user already has a completed recommendation, go straight to /bundles ──
+  // This fires immediately on mount (no delay) so returning users are never shown
+  // the segment selector unnecessarily.
   useEffect(() => {
     if (phase === 'complete' && recommendation) {
-      const timer = setTimeout(() => navigate(ROUTES.BUNDLES, { replace: true }), 800);
-      return () => clearTimeout(timer);
+      navigate(ROUTES.BUNDLES, { replace: true });
     }
   }, [phase, recommendation, navigate]);
 
@@ -38,12 +39,20 @@ export default function OnboardingPage() {
     }
   }, [phase, segment, questions.length, selectSegment]);
 
+  // Don't render anything while we are about to redirect
+  if (phase === 'complete' && recommendation) return null;
+
   // Determine what to show in the main area
-  const showSegmentSelect = phase === 'segment-select';
+  let showSegmentSelect = phase === 'segment-select';
   const showQuestioning   = phase === 'questioning' && questions.length > 0 && currentQuestion != null;
-  const showReloading     = phase === 'questioning' && questions.length === 0; // questions loading
+  const showReloading     = phase === 'questioning' && questions.length === 0;
   const showAnalyzing     = phase === 'analyzing';
-  const showComplete      = phase === 'complete' && recommendation != null;
+  const showComplete      = false; // We never reach this — already redirected above
+
+  // Fallback: if somehow we are in a ghost state, force segment selector
+  if (!showSegmentSelect && !showQuestioning && !showReloading && !showAnalyzing && !showComplete) {
+    showSegmentSelect = true;
+  }
 
   return (
     <PageTransition>
@@ -130,24 +139,6 @@ export default function OnboardingPage() {
             </motion.div>
           )}
         </main>
-
-        {/* Bottom CTA — shown after all questions answered */}
-        <AnimatePresence>
-          {showComplete && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50"
-            >
-              <button
-                onClick={() => navigate(ROUTES.BUNDLES)}
-                className="flex items-center gap-3 bg-[#1A56DB] hover:bg-blue-700 text-white font-black px-10 py-5 rounded-2xl shadow-2xl shadow-blue-500/30 transition-all hover:translate-y-[-2px]"
-              >
-                Get Bundle Recommendation <ArrowRight className="w-5 h-5" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </PageTransition>
   );

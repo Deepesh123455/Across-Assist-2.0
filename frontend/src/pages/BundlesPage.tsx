@@ -142,7 +142,12 @@ export default function BundlesPage() {
               {retrying ? 'Retrying…' : 'Retry'}
             </button>
             <button
-              onClick={() => navigate(ROUTES.ONBOARDING)}
+              onClick={() => {
+                localStorage.removeItem('aa_onboarding');
+                localStorage.removeItem('aa_recommendation_cache');
+                localStorage.removeItem('aa_session_token');
+                navigate(ROUTES.ONBOARDING);
+              }}
               className="bg-[#1A56DB] text-white font-black px-8 py-3 rounded-2xl"
             >
               Redo Onboarding

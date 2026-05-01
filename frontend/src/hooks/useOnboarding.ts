@@ -46,6 +46,14 @@ function loadFromStorage(): OnboardingState {
           } else {
             merged.currentIndex = 0;
           }
+        } else {
+          // If cached exists, load it so 'recommendation' is not null
+          try {
+            merged.recommendation = JSON.parse(cached);
+            merged.phase = 'complete';
+          } catch {
+            merged.phase = 'segment-select';
+          }
         }
       }
 
