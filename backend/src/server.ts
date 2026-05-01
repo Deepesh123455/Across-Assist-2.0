@@ -11,22 +11,32 @@ import { startAbandonmentCron } from './jobs/abandonmentCron';
 const server = createServer(app);
 
 const startServer = async () => {
-  await connectDatabase();
+  logger.info('🚀 Starting server initialization...');
 
-  // Redis is non-fatal: if Upstash is temporarily unreachable we log a warning
-  // but do NOT abort startup — routes that don't need OTP still work fine.
+  // Start listening on 0.0.0.0 (required for Render)
+  server.listen(env.PORT, '0.0.0.0', () => {
+    logger.info(`Server running in ${env.NODE_ENV} mode on 0.0.0.0:${env.PORT}`);
+    logger.info(`API Base: http://0.0.0.0:${env.PORT}/api/${env.API_VERSION}`);
+  });
+
   try {
-    await connectRedis();
+    logger.info('[Database] Connecting...');
+    await connectDatabase();
+    logger.info('[Database] ✅ Connected');
   } catch (err) {
-    logger.warn('[Redis] Could not connect at startup — OTP features will be degraded:', (err as Error).message);
+    logger.error('[Database] ❌ Connection failed:', (err as Error).message);
   }
 
-  server.listen(env.PORT, () => {
-    logger.info(`Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
-    logger.info(`API Base: http://localhost:${env.PORT}/api/${env.API_VERSION}`);
-    startAbandonmentCron();
-    logger.info('✅ Abandonment cron jobs started');
-  });
+  try {
+    logger.info('[Redis] Connecting...');
+    await connectRedis();
+    logger.info('[Redis] ✅ Connected');
+  } catch (err) {
+    logger.warn('[Redis] ⚠️ Could not connect at startup — OTP features will be degraded:', (err as Error).message);
+  }
+
+  startAbandonmentCron();
+  logger.info('✅ Abandonment cron jobs started');
 };
 
 const shutdown = async (signal: string) => {
