@@ -105,7 +105,7 @@ export class SessionService {
     let recommendation: Record<string, unknown> | null = null;
     if (session.recommendation) {
       try {
-        const raw = JSON.parse(session.recommendation.aiResponseRaw) as Record<string, unknown>;
+        const raw = JSON.parse(session.recommendation.aiResponseRaw || '{}') as Record<string, unknown>;
         recommendation = {
           ...raw,
           projectedAnnualRevenue: Number(session.recommendation.projectedAnnualRevenue ?? raw.projectedAnnualRevenue ?? 0),

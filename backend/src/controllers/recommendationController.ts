@@ -93,7 +93,7 @@ export const generate = async (
           req.get('user-agent')
         );
         session = created;
-        returnedToken = created.sessionToken;
+        returnedToken = created.sessionToken || '';
       }
     } else {
       const created = await sessionService.createSession(
@@ -101,7 +101,7 @@ export const generate = async (
         req.get('user-agent')
       );
       session = created;
-      returnedToken = created.sessionToken;
+      returnedToken = created.sessionToken || '';
     }
 
     // ── Fetch DB context for Groq ──

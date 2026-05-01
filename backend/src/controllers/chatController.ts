@@ -38,7 +38,7 @@ export const sendMessage = async (
     });
     const nextIndex =
       existingMessages.length > 0
-        ? existingMessages[existingMessages.length - 1].messageIndex + 1
+        ? (existingMessages[existingMessages.length - 1].messageIndex ?? 0) + 1
         : 1;
 
     if (isBlockedMessage(trimmed)) {
