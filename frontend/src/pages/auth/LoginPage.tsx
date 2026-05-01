@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { authService } from '../../services/auth.service';
 import { useToast } from '../../context/ToastContext';
 import PageTransition from '../../components/PageTransition';
+import logo from '../../assets/images/logo-for-white-bg.png';
 
 const OTP_LEN = 6;
 const COOLDOWN = 30;
@@ -140,7 +141,8 @@ export default function LoginPage() {
         toast('Demo login successful!', 'success');
         navigate('/dashboard');
       } catch (err: any) {
-        setEmailErr(err?.response?.data?.error ?? 'Demo login failed. Check the email.');
+        console.error('Demo login error:', err);
+        setEmailErr(err?.response?.data?.error ?? 'Demo login failed. Check the email or console for details.');
       } finally { setEmailLoading(false); }
       return;
     }
@@ -231,7 +233,7 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="mb-10 flex justify-center">
             <Link to="/">
-              <img src="/src/assets/images/logo-for-white-bg.png" alt="Across Assist" className="h-10 w-auto" />
+              <img src={logo} alt="Across Assist" className="h-10 w-auto" />
             </Link>
           </div>
 
