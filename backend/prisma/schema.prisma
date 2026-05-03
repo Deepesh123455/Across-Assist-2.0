@@ -118,12 +118,6 @@ model User {
   companyName     String    @map("company_name")
   phone           String?
 
-  // Business profile (pre-filled from session form data on signup)
-  clientType      ClientType? @map("client_type")
-  industry        String?
-  city            String?
-  website         String?
-
   // Account state
   isVerified      Boolean   @default(false) @map("is_verified")
   isEmailVerified    Boolean?   @default(false) @map("is_email_verified")

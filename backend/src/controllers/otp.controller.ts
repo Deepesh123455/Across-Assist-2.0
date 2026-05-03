@@ -1,20 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import { sendOtp, verifyOtp, abortOtp, demoLogin } from '../services/otp.service';
+import { 
+  sendOtp, 
+  verifyOtp, 
+  abortOtp, 
+  demoLogin, 
+  getMe, 
+  refreshToken as refreshSvc 
+} from '../services/otp.service';
+import { prisma } from '../lib/prisma';
 
-
-/**
- * POST /auth/otp/send
- * Body: { email: string }
- *
- * Sends a 6-digit OTP to the given email.
- * Returns { cooldownSeconds } so the client knows how long to block Resend.
- */
-export const sendOtpHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+export const sendOtpHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await sendOtp(req.body.email);
     res.status(StatusCodes.OK).json({ success: true, data: result });
@@ -23,42 +19,16 @@ export const sendOtpHandler = async (
   }
 };
 
-/**
- * POST /auth/otp/verify
- * Body: { email: string; code: string; sessionToken?: string }
- *
- * Verifies the OTP and, on success, returns the full AuthResponse
- * (user, tokens, sessionData) — same shape as the old /auth/login.
- */
-export const verifyOtpHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+export const verifyOtpHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await verifyOtp({
-      email: req.body.email,
-      code: req.body.code,
-      sessionToken: req.body.sessionToken,
-    });
+    const result = await verifyOtp(req.body);
     res.status(StatusCodes.OK).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * POST /auth/otp/abort
- * Body: { email: string }
- *
- * "Wrong email?" escape hatch — nukes all OTP state for the email so the
- * user can start a completely fresh login attempt.
- */
-export const abortOtpHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+export const abortOtpHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await abortOtp(req.body.email);
     res.status(StatusCodes.OK).json({ success: true });
@@ -67,22 +37,52 @@ export const abortOtpHandler = async (
   }
 };
 
-/**
- * POST /auth/otp/demo-login
- * Body: { email: string; sessionToken?: string }
- *
- * Demo/testing bypass — skips OTP entirely and issues real JWT tokens.
- * Should be disabled or heavily restricted in production.
- */
-export const demoLoginHandler = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+export const demoLoginHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await demoLogin(req.body.email, req.body.sessionToken);
     res.status(StatusCodes.OK).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
+};
+
+export const getMeHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await getMe(req.user!.id);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const checkEmailHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = req.query as { email?: string };
+    if (!email) {
+      res.status(StatusCodes.BAD_REQUEST).json({ success: false, error: 'email required' });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    res.json({ success: true, data: { exists: !!user } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const refreshHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      res.status(StatusCodes.BAD_REQUEST).json({ success: false, error: 'refreshToken required' });
+      return;
+    }
+    const result = await refreshSvc(refreshToken);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const logoutHandler = async (_req: Request, res: Response) => {
+  res.json({ success: true, message: 'Logged out' });
 };

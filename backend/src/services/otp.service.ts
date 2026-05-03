@@ -1,21 +1,21 @@
 /**
- * OTP Service — Enterprise-grade One-Time Password Login
+ * Auth Service — Enterprise-grade One-Time Password Login & Session Management
  *
- * Flow:
- *  1. sendOtp(email)   — rate-limit → generate → hash → store → dispatch email
- *  2. verifyOtp(...)   — lock-check → load payload → bcrypt compare → issue tokens
- *  3. abortOtp(email)  — nuke all 4 Redis keys → fresh slate
- *
- * Every Redis interaction uses the key-factory from lib/otpKeys.ts so there
- * is exactly one place that owns key names and TTLs.
+ * This service handles:
+ *  1. OTP flow (send, verify, abort)
+ *  2. Demo bypass login
+ *  3. Token refresh
+ *  4. User profile retrieval (getMe)
  */
 
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { StatusCodes } from 'http-status-codes';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { redis } from '../lib/redis';
 import { AppError } from '../middlewares/errorHandler';
+import { env } from '../config/env';
 import {
   otpCodeKey,
   otpCooldownKey,
@@ -27,24 +27,21 @@ import {
   OtpPayload,
 } from '../lib/otpKeys';
 import { sendOtpEmail } from './emailService';
-import { env } from '../config/env';
-import jwt from 'jsonwebtoken';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Types & Helpers
 // ---------------------------------------------------------------------------
-
-function generateOtpCode(): string {
-  // Cryptographically secure 6-digit code (000000 – 999999)
-  const bytes = crypto.randomBytes(4);
-  const num = bytes.readUInt32BE(0) % 1_000_000;
-  return num.toString().padStart(6, '0');
-}
 
 interface MergeResult {
   sessionToken: string | null;
   recommendation: Record<string, unknown> | null;
   formData: Record<string, unknown> | null;
+}
+
+function generateOtpCode(): string {
+  const bytes = crypto.randomBytes(4);
+  const num = bytes.readUInt32BE(0) % 1_000_000;
+  return num.toString().padStart(6, '0');
 }
 
 function generateTokens(id: string, email: string, role: string) {
@@ -55,6 +52,24 @@ function generateTokens(id: string, email: string, role: string) {
     expiresIn: env.JWT_REFRESH_EXPIRES_IN as any,
   });
   return { accessToken, refreshToken };
+}
+
+function extractRecommendation(rec: any): Record<string, unknown> | null {
+  if (!rec) return null;
+  const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
+  const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
+  return {
+    bundleName: rec.bundleName ?? '',
+    products: whyThisCombo,
+    reasons: whyThisCombo,
+    whyThisCombo,
+    projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
+    similarClients,
+    objectionHandle: rec.objectionHandler ?? '',
+    objectionHandler: rec.objectionHandler ?? '',
+    attachmentRate: rec.attachmentRate ?? 0.3,
+    recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
+  };
 }
 
 async function mergeSession(
@@ -69,8 +84,6 @@ async function mergeSession(
       where: { sessionToken },
       include: { recommendation: true },
     });
-    
-    // Do not steal a session that is already bound to a DIFFERENT user
     if (session && session.userId && session.userId !== userId) {
       session = null;
     }
@@ -91,56 +104,26 @@ async function mergeSession(
     data: { userId, isConverted: true, status: 'COMPLETED' as any, followUpSent: true },
   });
 
-  const rec = session.recommendation;
-  
-  if (rec) {
-    // If we merged a completed session, ensure the user is marked as having completed onboarding
+  if (session.recommendation) {
     await prisma.user.update({
       where: { id: userId },
-      data: {
-        onboardingDone: true,
-        primarySessionId: session.id,
-      },
+      data: { onboardingDone: true, primarySessionId: session.id },
     });
-  }
-  let recommendation: Record<string, unknown> | null = null;
-  if (rec) {
-    const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
-    const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
-    recommendation = {
-      bundleName: rec.bundleName ?? '',
-      products: whyThisCombo,
-      reasons: whyThisCombo,
-      whyThisCombo,
-      projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
-      similarClients,
-      objectionHandle: rec.objectionHandler ?? '',
-      objectionHandler: rec.objectionHandler ?? '',
-      attachmentRate: rec.attachmentRate ?? 0.3,
-      recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
-    };
   }
 
   return {
     sessionToken: session.sessionToken as string,
-    recommendation,
+    recommendation: extractRecommendation(session.recommendation),
     formData: (session.formData as Record<string, unknown> | null) ?? null,
   };
 }
 
 // ---------------------------------------------------------------------------
-// sendOtp
+// OTP Flow
 // ---------------------------------------------------------------------------
 
-export interface SendOtpResult {
-  /** How many seconds the caller must wait before requesting another OTP */
-  cooldownSeconds: number;
-}
-
-export async function sendOtp(email: string): Promise<SendOtpResult> {
+export async function sendOtp(email: string) {
   const normalised = email.toLowerCase().trim();
-
-  // ── 1. Load user if they exist ──────────────────────────────────────────────
   const user = await prisma.user.findUnique({
     where: { email: normalised },
     select: { id: true, isActive: true, name: true },
@@ -150,10 +133,8 @@ export async function sendOtp(email: string): Promise<SendOtpResult> {
     throw new AppError('This account has been deactivated.', StatusCodes.FORBIDDEN);
   }
 
-  // ── 2. Cooldown check ─────────────────────────────────────────────────────
   const cooldownKey = otpCooldownKey(normalised);
   const cooldownTtl = await redis.ttl(cooldownKey);
-
   if (cooldownTtl > 0) {
     throw new AppError(
       `Please wait ${cooldownTtl} seconds before requesting another code.`,
@@ -162,33 +143,21 @@ export async function sendOtp(email: string): Promise<SendOtpResult> {
     );
   }
 
-  // ── 3. Max-sends guard (prevent OTP bombing even across multiple windows) ──
   const codeKey = otpCodeKey(normalised);
   const existingRaw = await redis.get(codeKey);
-  if (existingRaw) {
-    const existing: OtpPayload = JSON.parse(existingRaw);
-    if (existing.sendCount >= OTP_MAX_SENDS) {
-      throw new AppError(
-        'Maximum OTP requests reached. Please wait for your current code to expire.',
-        StatusCodes.TOO_MANY_REQUESTS,
-        { cooldownSeconds: OTP_TTL.CODE },
-      );
-    }
+  const sendCount = existingRaw ? (JSON.parse(existingRaw) as OtpPayload).sendCount + 1 : 1;
+
+  if (sendCount > OTP_MAX_SENDS) {
+    throw new AppError('Maximum OTP requests reached.', StatusCodes.TOO_MANY_REQUESTS);
   }
 
-  // ── 4. Generate and hash the OTP ──────────────────────────────────────────
   const code = generateOtpCode();
-  
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`\n========================================`);
-    console.log(`🔑 DEVELOPMENT OTP CODE FOR ${normalised}: ${code}`);
-    console.log(`========================================\n`);
+    console.log(`\n🔑 [DEV] OTP for ${normalised}: ${code}\n`);
   }
 
   const codeHash = await bcrypt.hash(code, 10);
   const now = Date.now();
-  const sendCount = existingRaw ? (JSON.parse(existingRaw) as OtpPayload).sendCount + 1 : 1;
-
   const payload: OtpPayload = {
     codeHash,
     issuedAt: new Date(now).toISOString(),
@@ -197,114 +166,50 @@ export async function sendOtp(email: string): Promise<SendOtpResult> {
     sendCount,
   };
 
-  // ── 5. Persist to Redis ───────────────────────────────────────────────────
-  // Store OTP payload with hard expiry
   await redis.set(codeKey, JSON.stringify(payload), 'EX', OTP_TTL.CODE);
-  // Set cooldown only if it doesn't exist — NX prevents resetting the timer
-  // on a concurrent race condition. ioredis accepts the options object form.
   await redis.set(cooldownKey, '1', 'EX', OTP_TTL.RESEND_COOLDOWN, 'NX' as any);
 
-  // ── 6. Dispatch the email ──────────────────────────────────────────────────
   const displayName = user?.name || normalised.split('@')[0];
   await sendOtpEmail(normalised, code, displayName);
 
   return { cooldownSeconds: OTP_TTL.RESEND_COOLDOWN };
 }
 
-// ---------------------------------------------------------------------------
-// verifyOtp
-// ---------------------------------------------------------------------------
-
-export interface VerifyOtpInput {
-  email: string;
-  code: string;
-  sessionToken?: string;
-}
-
-export async function verifyOtp(input: VerifyOtpInput) {
+export async function verifyOtp(input: { email: string; code: string; sessionToken?: string }) {
   const normalised = input.email.toLowerCase().trim();
 
-  // ── 1. Lock check ─────────────────────────────────────────────────────────
+  // 1. Lock check
   const lockedKey = otpLockedKey(normalised);
   const lockTtl = await redis.ttl(lockedKey);
   if (lockTtl > 0) {
-    const minutesLeft = Math.ceil(lockTtl / 60);
-    throw new AppError(
-      `Account is temporarily locked. Try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`,
-      StatusCodes.FORBIDDEN,
-      { remainingSeconds: lockTtl },
-    );
+    throw new AppError('Account is temporarily locked.', StatusCodes.FORBIDDEN);
   }
 
-  // ── 2. Load OTP payload ───────────────────────────────────────────────────
+  // 2. Load OTP
   const codeKey = otpCodeKey(normalised);
   const raw = await redis.get(codeKey);
-
-  if (!raw) {
-    throw new AppError(
-      'OTP has expired. Please request a new one.',
-      StatusCodes.GONE,
-    );
-  }
+  if (!raw) throw new AppError('OTP has expired.', StatusCodes.GONE);
 
   const payload: OtpPayload = JSON.parse(raw);
-
-  // Sanity-check the embedded expiry (defence-in-depth against TTL drift)
-  if (Date.now() > payload.expiresAt) {
-    await redis.del(codeKey);
-    throw new AppError(
-      'OTP has expired. Please request a new one.',
-      StatusCodes.GONE,
-    );
-  }
-
-  // ── 3. Compare the submitted code against the stored hash ─────────────────
-  const attemptsKey = otpAttemptsKey(normalised);
   const isValid = await bcrypt.compare(input.code, payload.codeHash);
 
   if (!isValid) {
-    // Increment attempts counter
-    const attempts = await redis.incr(attemptsKey);
-
-    // Set TTL on first increment
-    if (attempts === 1) {
-      await redis.expire(attemptsKey, OTP_TTL.ATTEMPTS_WINDOW);
-    }
-
+    const attempts = await redis.incr(otpAttemptsKey(normalised));
+    if (attempts === 1) await redis.expire(otpAttemptsKey(normalised), OTP_TTL.ATTEMPTS_WINDOW);
+    
     if (attempts >= OTP_MAX_ATTEMPTS) {
-      // Lock the email — intentionally NOT resetting on further attempts
-      const pipeline = redis.pipeline();
-      pipeline.set(lockedKey, '1', 'EX', OTP_TTL.LOCK);
-      pipeline.del(codeKey);
-      pipeline.del(attemptsKey);
-      await pipeline.exec();
-
-      throw new AppError(
-        `Too many incorrect attempts. Account locked for ${OTP_TTL.LOCK / 60} minutes.`,
-        StatusCodes.FORBIDDEN,
-        { remainingSeconds: OTP_TTL.LOCK },
-      );
+      await redis.set(lockedKey, '1', 'EX', OTP_TTL.LOCK);
+      await redis.del(codeKey);
+      throw new AppError('Too many attempts. Account locked.', StatusCodes.FORBIDDEN);
     }
-
-    const remaining = OTP_MAX_ATTEMPTS - attempts;
-    throw new AppError(
-      `Incorrect code. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
-      StatusCodes.UNAUTHORIZED,
-      { attemptsRemaining: remaining },
-    );
+    throw new AppError('Incorrect code.', StatusCodes.UNAUTHORIZED);
   }
 
-  // ── 4. Success — clean up all OTP keys ───────────────────────────────────
-  const pipeline = redis.pipeline();
-  pipeline.del(codeKey);
-  pipeline.del(attemptsKey);
-  pipeline.del(lockedKey);
-  pipeline.del(otpCooldownKey(normalised));
-  await pipeline.exec();
+  // 3. Cleanup
+  await redis.del(codeKey, otpAttemptsKey(normalised), lockedKey, otpCooldownKey(normalised));
 
-  // ── 5. Load or create user and issue tokens ──────────────────────────────
+  // 4. User Session
   let user = await prisma.user.findUnique({ where: { email: normalised } });
-
   if (!user) {
     user = await prisma.user.create({
       data: {
@@ -316,147 +221,30 @@ export async function verifyOtp(input: VerifyOtpInput) {
         isEmailVerified: true,
       },
     });
-  } else if (!user.isActive) {
-    throw new AppError('Account deactivated.', StatusCodes.UNAUTHORIZED);
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  });
-
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   const mergeResult = await mergeSession(user.id, user.email, input.sessionToken);
 
-  let sessionToken = mergeResult.sessionToken;
-  let recommendation = mergeResult.recommendation;
-  let formData = mergeResult.formData;
-
-  let primarySessionId = user.primarySessionId;
-
-  // Aggressive Retrofit: Find orphaned completed sessions for existing users who were affected by the previous bug
-  // Trigger if primarySessionId is missing OR if we failed to resolve a recommendation earlier
-  if (!primarySessionId || !recommendation) {
-    const completedSessions = await prisma.session.findMany({
-      where: {
-        OR: [
-          { userId: user.id },
-          { email: { equals: user.email, mode: 'insensitive' as any }, isConverted: false }
-        ]
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: { recommendation: true },
-    });
-    const completedSession = completedSessions.find(s => !!s.recommendation);
-    if (completedSession) {
-      primarySessionId = completedSession.id;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { primarySessionId, onboardingDone: true }
-      });
-      user.onboardingDone = true;
-      
-      // Pull recommendation from the found session
-      const rec = completedSession.recommendation as any;
-      if (rec) {
-        const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
-        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
-        recommendation = {
-          bundleName: rec.bundleName ?? '',
-          products: whyThisCombo,
-          reasons: whyThisCombo,
-          whyThisCombo,
-          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
-          similarClients,
-          objectionHandle: rec.objectionHandler ?? '',
-          objectionHandler: rec.objectionHandler ?? '',
-          attachmentRate: rec.attachmentRate ?? 0.3,
-          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
-        };
-      }
-    }
-  }
-
-  if (!sessionToken && primarySessionId) {
-    const primary = await prisma.session.findUnique({
-      where: { id: primarySessionId },
-      include: { recommendation: true },
-    });
-    if (primary) {
-      sessionToken = primary.sessionToken;
-      const rec = primary.recommendation as any;
-      if (rec) {
-        const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
-        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
-        recommendation = {
-          bundleName: rec.bundleName ?? '',
-          products: whyThisCombo,
-          reasons: whyThisCombo,
-          whyThisCombo,
-          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
-          similarClients,
-          objectionHandle: rec.objectionHandler ?? '',
-          objectionHandler: rec.objectionHandler ?? '',
-          attachmentRate: rec.attachmentRate ?? 0.3,
-          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
-        };
-      }
-      formData = (primary.formData as Record<string, unknown> | null) ?? null;
-    }
-  }
-
   const tokens = generateTokens(user.id, user.email, String(user.role));
-
-  const finalOnboardingDone = user.onboardingDone || !!recommendation;
-
   return {
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      companyName: user.companyName,
-      phone: user.phone,
-      role: user.role,
-      clientType: user.clientType,
-      lastLoginAt: user.lastLoginAt,
-      createdAt: user.createdAt,
-      onboardingDone: finalOnboardingDone,
-    },
+    user: { ...user, onboardingDone: user.onboardingDone || !!mergeResult.recommendation },
     tokens,
-    sessionData: {
-      sessionToken: sessionToken ?? input.sessionToken ?? null,
-      recommendation,
-      formData,
-    },
+    sessionData: mergeResult,
   };
 }
 
-// ---------------------------------------------------------------------------
-// abortOtp — "Wrong email?" escape hatch
-// ---------------------------------------------------------------------------
-
-export async function abortOtp(email: string): Promise<void> {
+export async function abortOtp(email: string) {
   const normalised = email.toLowerCase().trim();
-
-  // Delete all 4 keys atomically — this gives the user a completely clean slate
-  const pipeline = redis.pipeline();
-  pipeline.del(otpCodeKey(normalised));
-  pipeline.del(otpCooldownKey(normalised));
-  pipeline.del(otpAttemptsKey(normalised));
-  pipeline.del(otpLockedKey(normalised));
-  await pipeline.exec();
+  await redis.del(otpCodeKey(normalised), otpCooldownKey(normalised), otpAttemptsKey(normalised), otpLockedKey(normalised));
 }
 
 // ---------------------------------------------------------------------------
-// demoLogin — OTP bypass for demonstration / testing
-//
-// Issues real JWT tokens for any registered, active user WITHOUT requiring
-// an OTP code.  This is gated by the DEMO_MODE env flag so it can be
-// completely disabled in production.
+// Demo & Profile
 // ---------------------------------------------------------------------------
 
 export async function demoLogin(email: string, sessionToken?: string) {
   const normalised = email.toLowerCase().trim();
-
   let user = await prisma.user.findUnique({ where: { email: normalised } });
   if (!user) {
     user = await prisma.user.create({
@@ -470,112 +258,42 @@ export async function demoLogin(email: string, sessionToken?: string) {
       },
     });
   }
-  if (!user.isActive) {
-    throw new AppError('This account has been deactivated.', StatusCodes.FORBIDDEN);
-  }
 
-  // Nuke any pending OTP state so the demo doesn't leave orphaned keys
-  const pipeline = redis.pipeline();
-  pipeline.del(otpCodeKey(normalised));
-  pipeline.del(otpCooldownKey(normalised));
-  pipeline.del(otpAttemptsKey(normalised));
-  pipeline.del(otpLockedKey(normalised));
-  await pipeline.exec();
-
+  await redis.del(otpCodeKey(normalised), otpCooldownKey(normalised), otpAttemptsKey(normalised), otpLockedKey(normalised));
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   const mergeResult = await mergeSession(user.id, user.email, sessionToken);
-  let resolvedSession = mergeResult.sessionToken;
-  let recommendation   = mergeResult.recommendation;
-  let formData         = mergeResult.formData;
-
-  let primarySessionId = user.primarySessionId;
-
-  // Aggressive Retrofit: Find orphaned completed sessions for existing users who were affected by the previous bug
-  if (!primarySessionId || !recommendation) {
-    const completedSessions = await prisma.session.findMany({
-      where: {
-        OR: [
-          { userId: user.id },
-          { email: { equals: user.email, mode: 'insensitive' as any }, isConverted: false }
-        ]
-      },
-      orderBy: { updatedAt: 'desc' },
-      include: { recommendation: true },
-    });
-    const completedSession = completedSessions.find(s => !!s.recommendation);
-    if (completedSession) {
-      primarySessionId = completedSession.id;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { primarySessionId, onboardingDone: true }
-      });
-      user.onboardingDone = true;
-
-      // Pull recommendation from the found session
-      const rec = completedSession.recommendation as any;
-      if (rec) {
-        const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
-        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
-        recommendation = {
-          bundleName: rec.bundleName ?? '',
-          products: whyThisCombo,
-          reasons: whyThisCombo,
-          whyThisCombo,
-          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
-          similarClients,
-          objectionHandle: rec.objectionHandler ?? '',
-          objectionHandler: rec.objectionHandler ?? '',
-          attachmentRate: rec.attachmentRate ?? 0.3,
-          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
-        };
-      }
-    }
-  }
-
-  if (!resolvedSession && primarySessionId) {
-    const primary = await prisma.session.findUnique({
-      where: { id: primarySessionId },
-      include: { recommendation: true },
-    });
-    if (primary) {
-      resolvedSession = primary.sessionToken;
-      const rec = primary.recommendation as any;
-      if (rec) {
-        const whyThisCombo  = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
-        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
-        recommendation = {
-          bundleName: rec.bundleName ?? '',
-          products: whyThisCombo, reasons: whyThisCombo, whyThisCombo,
-          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
-          similarClients,
-          objectionHandle: rec.objectionHandler ?? '',
-          objectionHandler: rec.objectionHandler ?? '',
-          attachmentRate: rec.attachmentRate ?? 0.3,
-          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
-        };
-      }
-      formData = (primary.formData as Record<string, unknown> | null) ?? null;
-    }
-  }
-
   const tokens = generateTokens(user.id, user.email, String(user.role));
 
-  const finalOnboardingDone = user.onboardingDone || !!recommendation;
+  return {
+    user: { ...user, onboardingDone: user.onboardingDone || !!mergeResult.recommendation },
+    tokens,
+    sessionData: mergeResult,
+  };
+}
+
+export async function getMe(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { primarySession: { include: { recommendation: true, chatMessages: { take: 50 } } } },
+  });
+  if (!user) throw new AppError('User not found', StatusCodes.NOT_FOUND);
 
   return {
-    user: {
-      id: user.id, email: user.email, name: user.name,
-      companyName: user.companyName, phone: user.phone,
-      role: user.role, clientType: user.clientType,
-      lastLoginAt: user.lastLoginAt, createdAt: user.createdAt,
-      onboardingDone: finalOnboardingDone,
-    },
-    tokens,
-    sessionData: {
-      sessionToken: resolvedSession ?? sessionToken ?? null,
-      recommendation,
-      formData,
-    },
+    user: { ...user, onboardingDone: user.onboardingDone || !!user.primarySession?.recommendation },
+    sessionToken: user.primarySession?.sessionToken ?? null,
+    recommendation: extractRecommendation(user.primarySession?.recommendation),
+    formData: user.primarySession?.formData ?? null,
+    chatCount: user.primarySession?.chatMessages?.length ?? 0,
   };
+}
+
+export async function refreshToken(token: string) {
+  try {
+    const payload = jwt.verify(token, env.JWT_REFRESH_SECRET) as { id: string; email: string };
+    const user = await prisma.user.findUnique({ where: { id: payload.id }, select: { role: true } });
+    return { tokens: generateTokens(payload.id, payload.email, String(user?.role ?? 'CLIENT')) };
+  } catch {
+    throw new AppError('Invalid refresh token', StatusCodes.UNAUTHORIZED);
+  }
 }

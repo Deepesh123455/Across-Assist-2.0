@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon",
     "build": "tsc --project tsconfig.json",
-    "build:prod": "npx prisma generate && npx prisma migrate deploy && tsc --project tsconfig.json",
+    "build:prod": "npx prisma generate && npx prisma db push --accept-data-loss && tsc --project tsconfig.json",
     "postinstall": "npx prisma generate",
     "start": "if [ -f dist/server.js ]; then node dist/server.js; else npm run build && node dist/server.js; fi",
     "lint": "eslint src/**/*.ts",
