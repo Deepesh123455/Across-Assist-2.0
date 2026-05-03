@@ -22,7 +22,6 @@ interface RegisterData {
   email: string;
   companyName: string;
   phone?: string;
-  password: string;
   sessionToken?: string;
   clientType?: string;
 }
@@ -38,15 +37,12 @@ export class AuthService {
     const exists = await prisma.user.findUnique({ where: { email: data.email } });
     if (exists) throw new AppError('An account with this email already exists', StatusCodes.CONFLICT);
 
-    const passwordHash = await bcrypt.hash(data.password, 12);
-
     const user = await prisma.user.create({
       data: {
         name: data.name,
         email: data.email,
         companyName: data.companyName,
         phone: data.phone,
-        passwordHash,
         role: 'CLIENT' as any,
         isVerified: false,
         isActive: true,

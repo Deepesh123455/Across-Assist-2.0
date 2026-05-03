@@ -15,6 +15,9 @@ import { apiRouter } from './routes';
 
 const app: Application = express();
 
+// Trust proxy for Render/Vercel (fixes rate-limit warning)
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet());
 

@@ -22,7 +22,6 @@ export class UserRepository {
     email: string;
     companyName: string;
     phone?: string | null;
-    passwordHash: string;
     clientType?: any;
     role?: any;
     isVerified?: boolean;
