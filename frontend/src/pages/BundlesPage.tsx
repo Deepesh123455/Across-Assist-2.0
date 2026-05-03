@@ -12,6 +12,7 @@ import { DashboardSidebar } from '../components/DashboardSidebar';
 import PageTransition from '../components/PageTransition';
 import { authService } from '../services/auth.service';
 import { getSessionToken } from '../lib/session';
+import { api } from '../lib/axios';
 import { ROUTES } from '../constants/routes';
 
 const SEGMENT_THEME: Record<string, { accent: string; badge: string; bg: string }> = {
@@ -43,7 +44,26 @@ async function loadRecommendation(sessionToken: string | null): Promise<Recommen
     }
   } catch { /* ignore */ }
 
-  // Strategy 3: backend fetch
+  // Strategy 3: backend fetch via identity (authoritative for logged in users)
+  try {
+    const res = await api.get('/bundles/my-bundle');
+    if (res.data?.success && res.data?.data) {
+      // Return both the bundle details and the raw recommendation metrics
+      const bundleData = res.data.data;
+      return {
+        ...bundleData,
+        // Ensure metrics are extracted from the nested recommendation if needed
+        metrics: bundleData.recommendation ? {
+          projectedAnnualRevenue: bundleData.recommendation.projectedAnnualRevenue,
+          attachRate: bundleData.recommendation.projectedAttachmentRate ?? 0.3,
+          planValue: bundleData.recommendation.projectedPlanValue ?? 1200,
+          revenueShare: bundleData.acrossAssistShare ?? 0.2
+        } : bundleData.metrics
+      };
+    }
+  } catch { /* ignore and fallback to sessionToken */ }
+
+  // Strategy 4: fallback to sessionToken status
   if (sessionToken) {
     try {
       const status = await onboardingService.getProfileStatus(sessionToken);

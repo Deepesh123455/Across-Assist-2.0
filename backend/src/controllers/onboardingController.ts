@@ -42,7 +42,14 @@ export const saveAnswer = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    const result = await onboardingService.saveAnswer(sessionToken, segment as Segment, questionId, answer);
+    const result = await onboardingService.saveAnswer(
+      sessionToken, 
+      segment as Segment, 
+      questionId, 
+      answer,
+      (req as any).user?.id,
+      (req as any).user?.email
+    );
     // result may contain a new sessionToken if the old session was COMPLETED
     res.json({ success: true, data: result });
   } catch (error) {
@@ -65,7 +72,12 @@ export const getRecommendation = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    const result = await onboardingService.generateRecommendation(sessionToken, segment as Segment);
+    const result = await onboardingService.generateRecommendation(
+      sessionToken, 
+      segment as Segment,
+      (req as any).user?.id,
+      (req as any).user?.email
+    );
     res.json({ success: true, data: result });
   } catch (error) {
     next(error);

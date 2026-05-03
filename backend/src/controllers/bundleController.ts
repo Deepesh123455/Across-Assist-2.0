@@ -241,3 +241,70 @@ export const getBundleBySlug = async (
     next(error);
   }
 };
+export const getMyBundle = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        primarySession: {
+          include: {
+            recommendation: true,
+          },
+        },
+      },
+    });
+
+    if (!user?.primarySession?.recommendation?.recommendedBundleId) {
+      res.status(404).json({ success: false, error: 'No recommendation found for this user' });
+      return;
+    }
+
+    const bundleId = user.primarySession.recommendation.recommendedBundleId;
+
+    const bundle = await prisma.bundle.findUnique({
+      where: { id: bundleId },
+      include: {
+        ...bundleProductsInclude,
+        ...clientBundlesDetailInclude,
+      },
+    });
+
+    if (!bundle) {
+      res.status(404).json({ success: false, error: 'Bundle not found' });
+      return;
+    }
+
+    const data = {
+      ...shapeBundleCore(bundle),
+      products: shapeProducts(bundle.bundleProducts),
+      socialProof: computeSocialProof(bundle.clientBundles),
+      recommendation: user.primarySession.recommendation, // Include raw recommendation for metrics
+      clientBundles: bundle.clientBundles.map((cb) => ({
+        clientId: cb.clientId,
+        name: cb.client.name,
+        logoUrl: cb.client.logoUrl,
+        tier: cb.client.tier,
+        city: cb.client.city,
+        industry: cb.client.industry,
+        testimonial: cb.testimonial,
+        monthlyUnits: cb.monthlyUnits,
+        attachmentRate: cb.attachmentRate,
+        revenueGenerated: cb.revenueGenerated,
+      })),
+    };
+
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

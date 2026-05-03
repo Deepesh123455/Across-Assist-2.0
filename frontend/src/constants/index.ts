@@ -16,4 +16,4 @@ let normalized = rawBaseUrl.endsWith('/api/v1') || rawBaseUrl.endsWith('/api/v1/
 // Always ensure a trailing slash for reliable relative path resolution in Axios
 export const API_BASE_URL = normalized.endsWith('/') ? normalized : `${normalized}/`;
 
-export const API_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT ?? 10000);
+export const API_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT ?? 60000);

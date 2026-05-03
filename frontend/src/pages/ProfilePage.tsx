@@ -8,6 +8,7 @@ import { authService } from '../services/auth.service';
 import { onboardingService, RecommendationResult, AddOn } from '../services/onboarding.service';
 import { getSessionToken } from '../lib/session';
 import { ROUTES } from '../constants/routes';
+import { api } from '../lib/axios';
 import PageTransition from '../components/PageTransition';
 
 const SEGMENT_LABELS: Record<string, string> = {
@@ -31,13 +32,43 @@ export default function ProfilePage() {
 
   useEffect(() => {
     const load = async () => {
+      setLoading(true);
       const token = getSessionToken();
-      if (!token) { setLoading(false); return; }
+      
       try {
-        const data = await onboardingService.getProfileStatus(token);
-        setProfileStatus(data);
-      } catch { /* silently fail */ }
-      finally { setLoading(false); }
+        // Try identity-based fetch first as it's more reliable for logged in users
+        const res = await api.get('/bundles/my-bundle');
+        if (res.data?.success && res.data?.data) {
+          const bundleData = res.data.data;
+          setProfileStatus({
+            isComplete: true,
+            recommendation: {
+              ...bundleData.recommendation,
+              bundleSlug: bundleData.slug,
+              bundleName: bundleData.name,
+              metrics: bundleData.recommendation ? {
+                projectedAnnualRevenue: bundleData.recommendation.projectedAnnualRevenue,
+                attachRate: bundleData.recommendation.projectedAttachmentRate ?? 0.3,
+                planValue: bundleData.recommendation.projectedPlanValue ?? 1200,
+                revenueShare: bundleData.acrossAssistShare ?? 0.2
+              } : bundleData.metrics
+            }
+          });
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.log('Identity fetch failed, falling back to session token', e);
+      }
+
+      // Fallback to session token
+      if (token) {
+        try {
+          const data = await onboardingService.getProfileStatus(token);
+          setProfileStatus(data);
+        } catch { /* silently fail */ }
+      }
+      setLoading(false);
     };
     load();
   }, []);

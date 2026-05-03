@@ -54,6 +54,8 @@ class OnboardingService {
     segment: Segment,
     questionId: string,
     answer: string,
+    userId?: string,
+    email?: string,
   ): Promise<{ currentStep: number; totalSteps: number; isLastQuestion: boolean; sessionToken?: string }> {
     let session = null;
     if (sessionToken) {
@@ -68,8 +70,20 @@ class OnboardingService {
           sessionToken: newToken,
           currentStep: 1,
           status: 'ACTIVE',
+          userId: userId ?? null,
+          email: email ?? null,
         },
       });
+    }
+
+    // Link session to user if it's not already linked
+    if (userId && !session.userId) {
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { userId, email: email ?? session.email }
+      });
+      session.userId = userId;
+      session.email = email ?? session.email;
     }
 
     // If the session was already COMPLETED by the login merge, create a fresh
@@ -126,9 +140,18 @@ class OnboardingService {
 
   // ─── Generate deterministic recommendation ───────────────────────────────────
 
-  async generateRecommendation(sessionToken: string, segment: Segment) {
+  async generateRecommendation(sessionToken: string, segment: Segment, userId?: string, email?: string) {
     const session = await prisma.session.findUnique({ where: { sessionToken } });
     if (!session) throw new Error('Session not found');
+
+    // Link session to user if it's not already linked
+    if (userId && !session.userId) {
+      await prisma.session.update({
+        where: { id: session.id },
+        data: { userId, email: email ?? session.email }
+      });
+      session.userId = userId;
+    }
 
     const formData = (session.formData as Record<string, unknown>) ?? {};
     const answers = (formData['onboarding_answers'] as Record<string, string>) ?? {};
@@ -282,13 +305,13 @@ class OnboardingService {
     const formData = (session.formData as Record<string, unknown>) ?? {};
     const segment = (formData['segment'] as Segment | null) ?? null;
     const answers = (formData['onboarding_answers'] as Record<string, string>) ?? {};
-    const isComplete = (formData['onboarding_complete'] as boolean) ?? false;
+    const isComplete = ((formData['onboarding_complete'] as boolean) ?? false) || !!session.recommendation;
     const totalSteps = segment ? getQuestionsForSegment(segment).length : 12;
     const currentStep = Object.keys(answers).length;
 
     let recommendation: OnboardingStatus['recommendation'] = null;
 
-    if (session.recommendation && isComplete) {
+    if (session.recommendation) {
       const bundleSlug = await prisma.bundle
         .findUnique({ where: { id: session.recommendation.recommendedBundleId ?? '' } })
         .then((b) => b?.slug ?? '');

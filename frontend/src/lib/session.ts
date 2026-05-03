@@ -67,9 +67,23 @@ export const logout = () => {
 };
 
 export const clearAll = () => {
-  [SESSION_KEY, EMAIL_KEY, FORM_DATA_KEY, RECOMMENDATION_KEY, CHAT_HISTORY_KEY, AUTH_KEY].forEach(
-    (k) => localStorage.removeItem(k),
-  );
+  [
+    SESSION_KEY,
+    EMAIL_KEY,
+    FORM_DATA_KEY,
+    RECOMMENDATION_KEY,
+    CHAT_HISTORY_KEY,
+    AUTH_KEY,
+    SESSION_TOKEN_KEY,
+    SOCIAL_PROOF_KEY,
+    'accessToken',
+    'refreshToken',
+    'aa_onboarding',
+    'aa_recommendation_cache',
+    'aa_bundle_slug',
+    'aa_onboarding_segment',
+    'aa_enquiries',
+  ].forEach((k) => localStorage.removeItem(k));
 };
 
 // ─── Backend session token (DB session.id) ────────────────────────────────────

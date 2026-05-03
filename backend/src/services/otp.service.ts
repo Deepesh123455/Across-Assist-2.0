@@ -69,11 +69,16 @@ async function mergeSession(
       where: { sessionToken },
       include: { recommendation: true },
     });
+    
+    // Do not steal a session that is already bound to a DIFFERENT user
+    if (session && session.userId && session.userId !== userId) {
+      session = null;
+    }
   }
 
   if (!session) {
     session = await prisma.session.findFirst({
-      where: { email, isConverted: false, status: { not: 'COMPLETED' as any } },
+      where: { email: { equals: email, mode: 'insensitive' as any }, isConverted: false },
       include: { recommendation: true },
       orderBy: { updatedAt: 'desc' },
     });
@@ -87,6 +92,17 @@ async function mergeSession(
   });
 
   const rec = session.recommendation;
+  
+  if (rec) {
+    // If we merged a completed session, ensure the user is marked as having completed onboarding
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        onboardingDone: true,
+        primarySessionId: session.id,
+      },
+    });
+  }
   let recommendation: Record<string, unknown> | null = null;
   if (rec) {
     const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
@@ -315,9 +331,54 @@ export async function verifyOtp(input: VerifyOtpInput) {
   let recommendation = mergeResult.recommendation;
   let formData = mergeResult.formData;
 
-  if (!sessionToken && user.primarySessionId) {
+  let primarySessionId = user.primarySessionId;
+
+  // Aggressive Retrofit: Find orphaned completed sessions for existing users who were affected by the previous bug
+  // Trigger if primarySessionId is missing OR if we failed to resolve a recommendation earlier
+  if (!primarySessionId || !recommendation) {
+    const completedSessions = await prisma.session.findMany({
+      where: {
+        OR: [
+          { userId: user.id },
+          { email: { equals: user.email, mode: 'insensitive' as any }, isConverted: false }
+        ]
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: { recommendation: true },
+    });
+    const completedSession = completedSessions.find(s => !!s.recommendation);
+    if (completedSession) {
+      primarySessionId = completedSession.id;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { primarySessionId, onboardingDone: true }
+      });
+      user.onboardingDone = true;
+      
+      // Pull recommendation from the found session
+      const rec = completedSession.recommendation as any;
+      if (rec) {
+        const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
+        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
+        recommendation = {
+          bundleName: rec.bundleName ?? '',
+          products: whyThisCombo,
+          reasons: whyThisCombo,
+          whyThisCombo,
+          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
+          similarClients,
+          objectionHandle: rec.objectionHandler ?? '',
+          objectionHandler: rec.objectionHandler ?? '',
+          attachmentRate: rec.attachmentRate ?? 0.3,
+          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
+        };
+      }
+    }
+  }
+
+  if (!sessionToken && primarySessionId) {
     const primary = await prisma.session.findUnique({
-      where: { id: user.primarySessionId },
+      where: { id: primarySessionId },
       include: { recommendation: true },
     });
     if (primary) {
@@ -345,6 +406,8 @@ export async function verifyOtp(input: VerifyOtpInput) {
 
   const tokens = generateTokens(user.id, user.email, String(user.role));
 
+  const finalOnboardingDone = user.onboardingDone || !!recommendation;
+
   return {
     user: {
       id: user.id,
@@ -356,7 +419,7 @@ export async function verifyOtp(input: VerifyOtpInput) {
       clientType: user.clientType,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
-      onboardingDone: user.onboardingDone,
+      onboardingDone: finalOnboardingDone,
     },
     tokens,
     sessionData: {
@@ -426,9 +489,53 @@ export async function demoLogin(email: string, sessionToken?: string) {
   let recommendation   = mergeResult.recommendation;
   let formData         = mergeResult.formData;
 
-  if (!resolvedSession && user.primarySessionId) {
+  let primarySessionId = user.primarySessionId;
+
+  // Aggressive Retrofit: Find orphaned completed sessions for existing users who were affected by the previous bug
+  if (!primarySessionId || !recommendation) {
+    const completedSessions = await prisma.session.findMany({
+      where: {
+        OR: [
+          { userId: user.id },
+          { email: { equals: user.email, mode: 'insensitive' as any }, isConverted: false }
+        ]
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: { recommendation: true },
+    });
+    const completedSession = completedSessions.find(s => !!s.recommendation);
+    if (completedSession) {
+      primarySessionId = completedSession.id;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { primarySessionId, onboardingDone: true }
+      });
+      user.onboardingDone = true;
+
+      // Pull recommendation from the found session
+      const rec = completedSession.recommendation as any;
+      if (rec) {
+        const whyThisCombo = Array.isArray(rec.whyThisCombo) ? rec.whyThisCombo : [];
+        const similarClients = Array.isArray(rec.similarClients) ? rec.similarClients : [];
+        recommendation = {
+          bundleName: rec.bundleName ?? '',
+          products: whyThisCombo,
+          reasons: whyThisCombo,
+          whyThisCombo,
+          projectedAnnualRevenue: Number(rec.projectedAnnualRevenue ?? 0),
+          similarClients,
+          objectionHandle: rec.objectionHandler ?? '',
+          objectionHandler: rec.objectionHandler ?? '',
+          attachmentRate: rec.attachmentRate ?? 0.3,
+          recommendedPlanValue: rec.recommendedPlanValue ?? 1200,
+        };
+      }
+    }
+  }
+
+  if (!resolvedSession && primarySessionId) {
     const primary = await prisma.session.findUnique({
-      where: { id: user.primarySessionId },
+      where: { id: primarySessionId },
       include: { recommendation: true },
     });
     if (primary) {
@@ -454,13 +561,15 @@ export async function demoLogin(email: string, sessionToken?: string) {
 
   const tokens = generateTokens(user.id, user.email, String(user.role));
 
+  const finalOnboardingDone = user.onboardingDone || !!recommendation;
+
   return {
     user: {
       id: user.id, email: user.email, name: user.name,
       companyName: user.companyName, phone: user.phone,
       role: user.role, clientType: user.clientType,
       lastLoginAt: user.lastLoginAt, createdAt: user.createdAt,
-      onboardingDone: user.onboardingDone,
+      onboardingDone: finalOnboardingDone,
     },
     tokens,
     sessionData: {

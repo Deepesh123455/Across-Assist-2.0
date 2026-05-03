@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { api } from '../lib/axios';
-import { saveSessionToken, saveRecommendation, saveFormData } from '../lib/session';
+import { saveSessionToken, saveRecommendation, saveFormData, clearAll } from '../lib/session';
 import type { AuthUser, AuthTokens, SessionData } from '../services/auth.service';
 
 interface AuthContextValue {
@@ -37,11 +37,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
         setSessionData(sd);
         if (data.sessionToken) saveSessionToken(data.sessionToken);
-        if (data.recommendation) saveRecommendation(data.recommendation);
+        if (data.recommendation) {
+          saveRecommendation(data.recommendation);
+          localStorage.setItem('aa_recommendation_cache', JSON.stringify(data.recommendation));
+          localStorage.setItem('aa_onboarding', JSON.stringify({ phase: 'complete', recommendation: data.recommendation }));
+        }
         if (data.formData) saveFormData(data.formData as Record<string, unknown>);
       } catch {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        clearAll();
       } finally {
         setIsLoading(false);
       }
@@ -55,15 +58,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem('accessToken', tokens.accessToken);
     localStorage.setItem('refreshToken', tokens.refreshToken);
     if (sd?.sessionToken) saveSessionToken(sd.sessionToken);
-    if (sd?.recommendation) saveRecommendation(sd.recommendation);
+    
+    // Crucial fix: If a new user logs in without a recommendation, wipe any stale local cache.
+    if (sd?.recommendation) {
+      saveRecommendation(sd.recommendation);
+      localStorage.setItem('aa_recommendation_cache', JSON.stringify(sd.recommendation));
+      localStorage.setItem('aa_onboarding', JSON.stringify({ phase: 'complete', recommendation: sd.recommendation }));
+    } else {
+      localStorage.removeItem('aa_recommendation_cache');
+      localStorage.removeItem('aa_onboarding');
+      localStorage.removeItem('aa_bundle_slug');
+      localStorage.removeItem('aa_onboarding_segment');
+    }
+    
     if (sd?.formData) saveFormData(sd.formData as Record<string, unknown>);
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     setSessionData(null);
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    clearAll();
   }, []);
 
   return (

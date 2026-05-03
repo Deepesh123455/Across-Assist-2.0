@@ -103,6 +103,64 @@ export class AuthService {
       },
     });
     if (!user) throw new AppError('User not found', StatusCodes.NOT_FOUND);
+    
+    let finalOnboardingDone = user.onboardingDone;
+
+    // Aggressive Retrofit: if primarySessionId is missing OR points to a session without a recommendation
+    console.log('[DEBUG] getMe recovery check for:', user.email, 'primarySessionId:', user.primarySessionId);
+    if (!user.primarySessionId) {
+      const allSessions = await prisma.session.findMany({
+        where: {
+          OR: [
+            { userId: user.id },
+            { email: { equals: user.email, mode: 'insensitive' as any } }
+          ]
+        },
+        orderBy: { updatedAt: 'desc' },
+        include: { recommendation: true },
+      });
+      console.log('[DEBUG] Found total sessions count:', allSessions.length);
+      const latestSession = allSessions[0]; // Just take the most recent one
+      console.log('[DEBUG] Using latest session:', latestSession?.id);
+
+      if (latestSession) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { 
+            primarySessionId: latestSession.id, 
+            onboardingDone: !!latestSession.recommendation 
+          }
+        });
+        finalOnboardingDone = !!latestSession.recommendation;
+
+        // Update the user object for the rest of the function
+        (user as any).primarySession = latestSession;
+        (user as any).primarySessionId = latestSession.id;
+      }
+    } else if (!user.primarySession?.recommendation) {
+      // If we HAVE a primary session but it's empty, check if there's a BETTER one
+      const sessionWithRec = await prisma.session.findFirst({
+        where: {
+          OR: [
+            { userId: user.id },
+            { email: { equals: user.email, mode: 'insensitive' as any } }
+          ],
+          recommendation: { isNot: null }
+        },
+        include: { recommendation: true },
+        orderBy: { updatedAt: 'desc' }
+      });
+      if (sessionWithRec) {
+        console.log('[DEBUG] Found better session with recommendation:', sessionWithRec.id);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { primarySessionId: sessionWithRec.id, onboardingDone: true }
+        });
+        (user as any).primarySession = sessionWithRec;
+        (user as any).primarySessionId = sessionWithRec.id;
+        finalOnboardingDone = true;
+      }
+    }
 
     return {
       user: {
@@ -115,7 +173,7 @@ export class AuthService {
         clientType: user.clientType,
         lastLoginAt: user.lastLoginAt,
         createdAt: user.createdAt,
-        onboardingDone: user.onboardingDone,
+        onboardingDone: finalOnboardingDone,
       },
       sessionToken: user.primarySession?.sessionToken ?? null,
       recommendation: this.extractRecommendation(user.primarySession?.recommendation ?? null),
@@ -146,7 +204,7 @@ export class AuthService {
 
     if (!session) {
       session = await prisma.session.findFirst({
-        where: { email, isConverted: false, status: { not: 'COMPLETED' as any } },
+        where: { email: { equals: email, mode: 'insensitive' as any }, isConverted: false },
         include: { recommendation: true },
         orderBy: { updatedAt: 'desc' },
       });

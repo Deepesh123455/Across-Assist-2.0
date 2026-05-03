@@ -10,6 +10,7 @@ import { authService } from '../services/auth.service';
 import PageTransition from '../components/PageTransition';
 import { DashboardSidebar } from '../components/DashboardSidebar';
 import { RevenueHero } from '../components/RevenueHero';
+import { api } from '../lib/axios';
 
 const normalizeRecommendation = (rec: any) => {
   if (!rec) return null;
@@ -34,13 +35,36 @@ const DashboardPage = () => {
       navigate('/auth/login', { replace: true });
       return;
     }
-    // Redirect users who haven't completed onboarding
-    if (authUser && authUser.onboardingDone === false) {
-      navigate('/onboarding', { replace: true });
-      return;
-    }
-    setRecommendation(normalizeRecommendation(sessionData?.recommendation ?? null));
-    setFormData(sessionData?.formData ?? null);
+
+    const loadDashboardData = async () => {
+      if (authUser) {
+        // First try session data
+        let rec = sessionData?.recommendation;
+        let fd = sessionData?.formData;
+
+        // If missing, try fetching via identity
+        if (!rec) {
+          try {
+            const res = await api.get('/bundles/my-bundle');
+            if (res.data?.success && res.data?.data) {
+              const bundleData = res.data.data;
+              rec = {
+                ...bundleData.recommendation,
+                bundleSlug: bundleData.slug,
+                bundleName: bundleData.name,
+              };
+            }
+          } catch (e) {
+            console.error('Failed to fetch identity bundle:', e);
+          }
+        }
+
+        setRecommendation(normalizeRecommendation(rec ?? null));
+        setFormData(fd ?? null);
+      }
+    };
+
+    loadDashboardData();
   }, [isAuthenticated, authUser, sessionData, navigate]);
 
 
