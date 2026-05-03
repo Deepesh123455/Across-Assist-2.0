@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+
 import jwt from 'jsonwebtoken';
 import { StatusCodes } from 'http-status-codes';
 import { prisma } from '../lib/prisma';
@@ -99,7 +99,7 @@ export class AuthService {
       },
     });
     if (!user) throw new AppError('User not found', StatusCodes.NOT_FOUND);
-    
+
     let finalOnboardingDone = user.onboardingDone;
 
     // Aggressive Retrofit: if primarySessionId is missing OR points to a session without a recommendation
@@ -122,9 +122,9 @@ export class AuthService {
       if (latestSession) {
         await prisma.user.update({
           where: { id: user.id },
-          data: { 
-            primarySessionId: latestSession.id, 
-            onboardingDone: !!latestSession.recommendation 
+          data: {
+            primarySessionId: latestSession.id,
+            onboardingDone: !!latestSession.recommendation
           }
         });
         finalOnboardingDone = !!latestSession.recommendation;
