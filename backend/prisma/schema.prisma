@@ -117,8 +117,6 @@ model User {
   name            String
   companyName     String    @map("company_name")
   phone           String?
-  googleId        String?   @unique @map("google_id")
-  avatarUrl       String?   @map("avatar_url")
 
   // Business profile (pre-filled from session form data on signup)
   clientType      ClientType? @map("client_type")
